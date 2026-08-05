@@ -1,0 +1,18 @@
+Olá, {{nome}}! Tudo bem?
+
+Passando para lembrar que o seu saldo atual com a Vale Verde é de R$ {{valor}}.
+
+Manter suas contas em dia garante que seu crédito permaneça ativo e liberado, permitindo que você continue aproveitando nossos produtos e ofertas exclusivas sem interrupções!
+
+💡 Que tal quitar esse valor hoje e já garantir suas próximas compras?
+
+Chave PIX: 22998628769
+Valor: R$ {{valor}}
+
+Assim que realizar o pagamento, nos envie o comprovante por aqui.
+
+Se precisar de alguma facilidade ou quiser negociar esse saldo, é só nos chamar — estamos à disposição para ajudar!
+Agradecemos muito pela sua parceria de sempre.
+
+Com carinho,
+Equipe Vale Verde 🌿
