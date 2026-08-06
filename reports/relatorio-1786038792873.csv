@@ -1,0 +1,4 @@
+Cliente,Numero,Valor,StatusEnvio
+A,(22) 99908-8850,100,Enviado
+B,,50,Ignorado
+C,(11) 91234-5678,75,Erro - Não tem WhatsApp
