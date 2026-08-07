@@ -1,0 +1,37 @@
+2026/08/07-14:30:46.125 2204 Reusing MANIFEST C:\Users\Lenovo\Documents\botcobra\ValeVerdeBot\.wwebjs_auth\session-teste-send-monolito\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/08/07-14:30:46.126 2204 Recovering log #98
+2026/08/07-14:30:46.146 2204 Reusing old log C:\Users\Lenovo\Documents\botcobra\ValeVerdeBot\.wwebjs_auth\session-teste-send-monolito\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000098.log 
+2026/08/07-14:30:56.909 2204 Level-0 table #107: started
+2026/08/07-14:30:57.267 2204 Level-0 table #107: 1163144 bytes OK
+2026/08/07-14:30:57.279 2204 Delete type=0 #98
+2026/08/07-14:30:57.995 2204 Compacting 1@1 + 5@2 files
+2026/08/07-14:30:58.589 2204 Generated table #108@1: 44899 keys, 2281988 bytes
+2026/08/07-14:30:58.638 2204 Generated table #109@1: 13136 keys, 2171865 bytes
+2026/08/07-14:30:58.688 2204 Generated table #110@1: 42976 keys, 2173178 bytes
+2026/08/07-14:30:58.862 2204 Generated table #111@1: 105054 keys, 2256708 bytes
+2026/08/07-14:30:58.889 2204 Generated table #112@1: 23616 keys, 596848 bytes
+2026/08/07-14:30:58.889 2204 Compacted 1@1 + 5@2 files => 9480587 bytes
+2026/08/07-14:30:58.894 2204 compacted to: files[ 0 0 5 0 0 0 0 ]
+2026/08/07-14:30:58.895 2204 Delete type=2 #100
+2026/08/07-14:30:58.895 2204 Delete type=2 #101
+2026/08/07-14:30:58.895 2204 Delete type=2 #102
+2026/08/07-14:30:58.895 2204 Delete type=2 #103
+2026/08/07-14:30:58.895 2204 Delete type=2 #104
+2026/08/07-14:30:58.895 2204 Delete type=2 #107
+2026/08/07-14:31:21.487 2204 Level-0 table #114: started
+2026/08/07-14:31:21.518 2204 Level-0 table #114: 1145647 bytes OK
+2026/08/07-14:31:21.520 2204 Delete type=0 #106
+2026/08/07-14:31:22.381 2204 Compacting 1@1 + 5@2 files
+2026/08/07-14:31:22.440 2204 Generated table #115@1: 47135 keys, 2285798 bytes
+2026/08/07-14:31:22.477 2204 Generated table #116@1: 13158 keys, 2173577 bytes
+2026/08/07-14:31:22.521 2204 Generated table #117@1: 36731 keys, 2166221 bytes
+2026/08/07-14:31:22.594 2204 Generated table #118@1: 105731 keys, 2259369 bytes
+2026/08/07-14:31:22.623 2204 Generated table #119@1: 35350 keys, 847057 bytes
+2026/08/07-14:31:22.623 2204 Compacted 1@1 + 5@2 files => 9732022 bytes
+2026/08/07-14:31:22.626 2204 compacted to: files[ 0 0 5 0 0 0 0 ]
+2026/08/07-14:31:22.626 2204 Delete type=2 #108
+2026/08/07-14:31:22.627 2204 Delete type=2 #109
+2026/08/07-14:31:22.627 2204 Delete type=2 #110
+2026/08/07-14:31:22.627 2204 Delete type=2 #111
+2026/08/07-14:31:22.627 2204 Delete type=2 #112
+2026/08/07-14:31:22.627 2204 Delete type=2 #114

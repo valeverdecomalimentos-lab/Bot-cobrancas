@@ -1,0 +1,91 @@
+Relatório de envio - 07/08/2026, 14:40:12
+
+Total de clientes: 81
+Enviados: 39
+Ignorados: 42
+Erros: 0
+
+=== ENVIADOS ===
+- Alexandre e Simone (22) 99908-8850 | Alexandre e Simone (22) 99908-8850 | R$ 310.55 | Devedor
+- Andre Luiz ( Filho da Ivone (22) 99783-2068 | Andre Luiz ( Filho da Ivone (22) 99783-2068 | R$ 233.47 | Devedor
+- Antonia Polyana Bezerra (22) 99737-5285 | Antonia Polyana Bezerra (22) 99737-5285 | R$ 1032.92 | Devedor
+- Armazém Beira Rio (Veve) (22) 99811-7789 | Armazém Beira Rio (Veve) (22) 99811-7789 | R$ 1773.49 | Devedor
+- Asis Rosa (22) 99825-7465 | Asis Rosa (22) 99825-7465 | R$ 119 | Devedor
+- Athus Da Silva Filho (21) 96934-9483 | Athus Da Silva Filho (21) 96934-9483 | R$ 187 | Devedor
+- Catia Binda (Salão) (22) 99997-1518 | Catia Binda (Salão) (22) 99997-1518 | R$ 134 | Devedor
+- Cleia Donadio (22) 99900-7952 | Cleia Donadio (22) 99900-7952 | R$ 1 | Devedor
+- D. Araci (22) 98848-5536 | D. Araci (22) 98848-5536 | R$ 139.06 | Devedor
+- D. Sandra ( Sogra da Fabia ) (22) 99701-0080 | D. Sandra ( Sogra da Fabia ) (22) 99701-0080 | R$ 17.52 | Devedor
+- Efigenia (22) 98843-3596 | Efigenia (22) 98843-3596 | R$ 142.17 | Devedor
+- Felipe Donadio (22) 99862-8769 | Felipe Donadio (22) 99862-8769 | R$ 1 | Devedor
+- Fernanda Pessanha Rodrigues ( Filha da Heloisa ) (22) 99209-2774 | Fernanda Pessanha Rodrigues ( Filha da Heloisa ) (22) 99209-2774 | R$ 469.25 | Devedor
+- Gil Dazio E Claudia Mello (22) 99908-9950 | Gil Dazio E Claudia Mello (22) 99908-9950 | R$ 27.51 | Devedor
+- Guilherme ( Tucunare ) (22) 99943-0013 | Guilherme ( Tucunare ) (22) 99943-0013 | R$ 267.65 | Devedor
+- Heloisa ( Chicoria ) (22) 99812-1923 | Heloisa ( Chicoria ) (22) 99812-1923 | R$ 62.45 | Devedor
+- Iris Martins (22) 99722-6270 | Iris Martins (22) 99722-6270 | R$ 62.32 | Devedor
+- Jaciene De Jesus Santos (22) 99833-9912 | Jaciene De Jesus Santos (22) 99833-9912 | R$ 50.44 | Devedor
+- Jose Luiz Moureira Marques ( Nem) (22) 99962-8799 | Jose Luiz Moureira Marques ( Nem) (22) 99962-8799 | R$ 16.55 | Devedor
+- Jose Mauro Farias (Professor) (22) 98103-7822 | Jose Mauro Farias (Professor) (22) 98103-7822 | R$ 523.77 | Devedor
+- Juliana Cordeiro (Gari) (22) 99892-8825 | Juliana Cordeiro (Gari) (22) 99892-8825 | R$ 243.02 | Devedor
+- Julio Cesar Oliveira (Lira e Marcia) (22) 99774-1269 | Julio Cesar Oliveira (Lira e Marcia) (22) 99774-1269 | R$ 154.33 | Devedor
+- Marcelo ( Vinho ) (21) 96471-1503 | Marcelo ( Vinho ) (21) 96471-1503 | R$ 17 | Devedor
+- Maria Zelia Freitas Lyrios (22) 99802-9349 | Maria Zelia Freitas Lyrios (22) 99802-9349 | R$ 42.09 | Devedor
+- Mariana Viana (22) 98166-3293 | Mariana Viana (22) 98166-3293 | R$ 161 | Devedor
+- Marluce (Irma da Rosilene) (22) 99830-6880 | Marluce (Irma da Rosilene) (22) 99830-6880 | R$ 170 | Devedor
+- Matheus Gomes (22) 99899-3706 | Matheus Gomes (22) 99899-3706 | R$ 145 | Devedor
+- Maurino Andrade Silva (Robalo) (22) 99966-2537 | Maurino Andrade Silva (Robalo) (22) 99966-2537 | R$ 182.7 | Devedor
+- Monique Mello (21) 99742-1315 | Monique Mello (21) 99742-1315 | R$ 38.86 | Devedor
+- Netinho e Mayara (22) 9982-3856 | Netinho e Mayara (22) 9982-3856 | R$ 352.83 | Devedor
+- Pricila ( CIEP ) (22) 99730-7263 | Pricila ( CIEP ) (22) 99730-7263 | R$ 60.54 | Devedor
+- Renato Farah (22) 97400-3731 | Renato Farah (22) 97400-3731 | R$ 40 | Devedor
+- Rocio (Vizinha) (22) 99276-3835 | Rocio (Vizinha) (22) 99276-3835 | R$ 205.44 | Devedor
+- Romulo Vieira De Freitas ( Filho da Catia) (22) 98056-0001 | Romulo Vieira De Freitas ( Filho da Catia) (22) 98056-0001 | R$ 106.32 | Devedor
+- Rosangela Amiga da dona da agua (22) 99970-2864 | Rosangela Amiga da dona da agua (22) 99970-2864 | R$ 120 | Devedor
+- Rosilene Dos Santos ( Guarda - GM) (21) 98693-2601 | Rosilene Dos Santos ( Guarda - GM) (21) 98693-2601 | R$ 174.54 | Devedor
+- Vania Macedo (22) 99251-2521 | Vania Macedo (22) 99251-2521 | R$ 5.62 | Devedor
+- Vera Lucia Da Silva (22) 99987-3945 | Vera Lucia Da Silva (22) 99987-3945 | R$ 205.46 | Devedor
+- Walquer (Apostolo paulo) (22) 99818-3408 | Walquer (Apostolo paulo) (22) 99818-3408 | R$ 283.29 | Devedor
+
+=== IGNORADOS ===
+- *Excluído * Rogerinho ( pedreiro ) |  | R$ 768 | Ignorado
+- Alberto Beto |  | R$ 22.81 | Ignorado
+- Alexandre Xavier |  | R$ 11 | Ignorado
+- Ana ( Filha de Alzimar) |  | R$ 27 | Ignorado
+- Angela ( Irma de Zeltom ) |  | R$ 74.76 | Ignorado
+- Antonio ( Barbeiro ) |  | R$ 85 | Ignorado
+- Aparecida (Costureira) |  | R$ 5.81 | Ignorado
+- Audri (Padrinho) |  | R$ 66 | Ignorado
+- Cacia Pesanha |  | R$ 327.12 | Ignorado
+- Carlos Andre ( Beija-Flor) |  | R$ 102.04 | Ignorado
+- Creche Mundo Feliz |  | R$ 451.76 | Ignorado
+- D Elaine (Gari) |  | R$ 27.28 | Ignorado
+- D.Tereza |  | R$ 35.13 | Ignorado
+- D.Wilma |  | R$ 264 | Ignorado
+- Elizabeth Lopes |  | R$ 27 | Ignorado
+- Francicleia |  | R$ 26.45 | Ignorado
+- Francisco De Assis Rosa |  | R$ 249.5 | Ignorado
+- Gustavo (Prainha) |  | R$ 82 | Ignorado
+- hyago |  | R$ 0.25 | Ignorado
+- Irami ( costureira ) |  | R$ 39.4 | Ignorado
+- Ivanildo Alves (irmão) |  | R$ 104.21 | Ignorado
+- Ivone ( Mae do Andre ) |  | R$ 321.97 | Ignorado
+- Jorgete |  | R$ 14 | Ignorado
+- Jose Luiz Da Conceição |  | R$ 64.37 | Ignorado
+- Lili Bar |  | R$ 15.87 | Ignorado
+- Lucimara |  | R$ 12 | Ignorado
+- Luiz Claudio Terra - Marido da Mineira |  | R$ 32 | Ignorado
+- Maria Aparecida Correia (POSTO) |  | R$ 274.33 | Ignorado
+- Mauri Pinheiro |  | R$ 241.09 | Ignorado
+- Miguel Arcanjo |  | R$ 132.4 | Ignorado
+- Milce Pereira da Costa |  | R$ 25 | Ignorado
+- Nair Antonia Borges |  | R$ 26.19 | Ignorado
+- Pastor Claudio |  | R$ 130 | Ignorado
+- Pastora Irami |  | R$ 222 | Ignorado
+- Paula De Carvalho (Mae do Martinho) |  | R$ 200 | Ignorado
+- Paulo (GAROPA) |  | R$ 305 | Ignorado
+- Professora de yoga |  | R$ 0.45 | Ignorado
+- Rita ( De cacio) |  | R$ 70.3 | Ignorado
+- Rogerio (Pedreiro) |  | R$ 847 | Ignorado
+- Ronaldo Almeida Dias |  | R$ 54 | Ignorado
+- Sandro Jose (Pedra 90) |  | R$ 216.46 | Ignorado
+- Yara |  | R$ 40.18 | Ignorado

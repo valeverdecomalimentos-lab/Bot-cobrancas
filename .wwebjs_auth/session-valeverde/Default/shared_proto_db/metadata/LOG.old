@@ -1,0 +1,4 @@
+2026/08/07-14:34:26.286 17f8 Creating DB C:\Users\Lenovo\Documents\botcobra\ValeVerdeBot\.wwebjs_auth\session-valeverde\Default\shared_proto_db\metadata since it was missing.
+2026/08/07-14:34:26.330 17f8 Reusing MANIFEST C:\Users\Lenovo\Documents\botcobra\ValeVerdeBot\.wwebjs_auth\session-valeverde\Default\shared_proto_db\metadata/MANIFEST-000001
+2026/08/07-14:34:26.330 17f8 Recovering log #3
+2026/08/07-14:34:26.330 17f8 Reusing old log C:\Users\Lenovo\Documents\botcobra\ValeVerdeBot\.wwebjs_auth\session-valeverde\Default\shared_proto_db\metadata/000003.log 

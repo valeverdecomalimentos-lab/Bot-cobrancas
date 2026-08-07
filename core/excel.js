@@ -2,7 +2,11 @@ const xlsx = require('xlsx');
 const validator = require('./validator');
 
 function stripHtml(text) {
-    return String(text).replace(/<[^>]*>/g, ' ');
+    return String(text || '')
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function buscarTelefoneNoTexto(text) {
@@ -10,22 +14,35 @@ function buscarTelefoneNoTexto(text) {
     const valor = stripHtml(text);
     const padrao = /(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?(?:9\d{4}[-\s]?\d{4}|\d{4}[-\s]?\d{4}|\d{11})/g;
     const encontrado = valor.match(padrao);
-    if (!encontrado) return null;
-    return encontrado[0];
+    return encontrado ? encontrado[0] : null;
 }
 
 function extrairTelefone(row, keyTelefone) {
     if (keyTelefone && row[keyTelefone]) {
-        return row[keyTelefone];
+        return String(row[keyTelefone]).trim();
     }
 
     const values = Object.values(row);
     for (const value of values) {
         const telefone = buscarTelefoneNoTexto(value);
-        if (telefone) return telefone;
+        if (telefone) return String(value).trim();
     }
 
     return "";
+}
+
+function separarNomeTelefone(text) {
+    const clean = stripHtml(text);
+    const telefone = buscarTelefoneNoTexto(clean);
+    if (!telefone) {
+        return { nome: clean, telefone: '' };
+    }
+
+    const nome = clean.replace(telefone, '').replace(/[\(\)\-\s]{2,}/g, ' ').trim();
+    return {
+        nome: nome || clean,
+        telefone
+    };
 }
 
 module.exports = {
@@ -34,24 +51,36 @@ module.exports = {
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const data = xlsx.utils.sheet_to_json(sheet, { defval: "" });
-        
+
         return data.map(row => {
             const keys = Object.keys(row);
-            const keyNome = keys.find(k => k.toLowerCase().includes('nome') || k.toLowerCase().includes('cliente'));
-            const keyTelefone = keys.find(k => k.toLowerCase().includes('telefone') || k.toLowerCase().includes('celular') || k.toLowerCase().includes('contato'));
-            const keyValor = keys.find(k => k.toLowerCase().includes('valor') || k.toLowerCase().includes('saldo'));
-            const keyStatus = keys.find(k => k.toLowerCase().includes('status'));
+            const keyNome = keys.find(k => /nome|cliente/i.test(k));
+            const keyTelefone = keys.find(k => /telefone|celular|contato|numero/i.test(k));
+            const keyValor = keys.find(k => /valor|saldo|d[íi]vida|divida|devido/i.test(k));
+            const keyStatus = keys.find(k => /status|situa/i.test(k));
 
-            const telefoneRaw = extrairTelefone(row, keyTelefone);
-            const telefoneFormatado = validator.formatarNumero(telefoneRaw);
-            const nomeRaw = keyNome ? row[keyNome] : "Cliente";
+            const rawNome = keyNome ? String(row[keyNome]) : '';
+            const rawTelefone = extrairTelefone(row, keyTelefone);
+
+            let nome = stripHtml(rawNome);
+            let telefoneOriginal = stripHtml(rawTelefone);
+
+            if (!telefoneOriginal && rawNome) {
+                const parsed = separarNomeTelefone(rawNome);
+                nome = parsed.nome;
+                telefoneOriginal = parsed.telefone;
+            }
+
+            const telefoneValido = validator.formatarNumero(telefoneOriginal);
+            const valor = keyValor ? row[keyValor] : '0,00';
+            const statusRaw = keyStatus ? row[keyStatus] : 'Devedor';
 
             return {
-                nome: String(nomeRaw).trim() || "Cliente",
-                telefoneOriginal: telefoneRaw,
-                telefoneValido: telefoneFormatado,
-                valor: keyValor ? row[keyValor] : "0,00",
-                status: keyStatus ? row[keyStatus] : "Devedor",
+                nome: nome || 'Cliente',
+                telefoneOriginal: telefoneOriginal || '',
+                telefoneValido,
+                valor,
+                status: String(statusRaw).trim() || 'Devedor',
                 linhaRaw: row
             };
         });

@@ -2,11 +2,17 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
-const xlsx = require('xlsx');
+const readline = require('readline');
+const excel = require('./core/excel');
+const message = require('./core/message');
+const report = require('./core/report');
+const config = require('./config');
+const qrweb = require('./core/qrweb');
 
 const TARGET_NUMBER_RAW = '22999055666';
 const LISTAS_DIR = path.join(__dirname, 'listas');
 const TEMPLATE_PATH = path.join(__dirname, 'templates', 'cobranca.txt');
+const AUTH_CLIENT_ID = 'teste-send-monolito';
 
 function encontrarPlanilha() {
     if (!fs.existsSync(LISTAS_DIR)) return null;
@@ -16,7 +22,6 @@ function encontrarPlanilha() {
     if (arquivos.length === 0) return null;
     return path.join(LISTAS_DIR, arquivos[0]);
 }
-const AUTH_CLIENT_ID = 'teste-send-monolito';
 
 function formatNumberToJid(raw) {
     if (!raw) throw new Error('Número inválido');
@@ -27,71 +32,10 @@ function formatNumberToJid(raw) {
     return `${num}@c.us`;
 }
 
-function formatValor(valor) {
-    if (valor === undefined || valor === null || valor === '') return '0,00';
-    if (typeof valor === 'number') {
-        return valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    const cleaned = String(valor).replace(/\s/g, '').replace(',', '.');
-    const n = Number(cleaned);
-    if (!Number.isNaN(n)) {
-        return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    return String(valor).trim();
-}
-
-function stripHtml(text) {
-    return String(text).replace(/<[^>]*>/g, ' ');
-}
-
-function buscarTelefoneNoTexto(text) {
-    if (!text) return null;
-    const valor = stripHtml(text);
-    const padrao = /(?:\+?55\s*)?(?:\(?\d{2}\)?\s*)?(?:9\d{4}[-\s]?\d{4}|\d{4}[-\s]?\d{4}|\d{11})/g;
-    const encontrado = valor.match(padrao);
-    return encontrado ? encontrado[0] : null;
-}
-
-function lerPlanilha(caminho) {
-    if (!fs.existsSync(caminho)) {
-        throw new Error(`Arquivo não encontrado: ${caminho}`);
-    }
-    const workbook = xlsx.readFile(caminho);
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = xlsx.utils.sheet_to_json(sheet, { defval: '' });
-
-    return data.map(row => {
-        const keys = Object.keys(row);
-        const keyNome = keys.find(k => /nome|cliente/i.test(k));
-        const keyTelefone = keys.find(k => /telefone|celular|contato|numero/i.test(k));
-        const keyValor = keys.find(k => /valor|saldo|d[íi]vida|divida/i.test(k));
-
-        const nome = keyNome ? String(row[keyNome]).trim() : 'Cliente';
-        const telefoneOriginal = keyTelefone ? String(row[keyTelefone]).trim() : buscarTelefoneNoTexto(Object.values(row).join(' '));
-        const valor = keyValor ? row[keyValor] : '';
-
-        return {
-            nome,
-            numero: telefoneOriginal || '',
-            valor: formatValor(valor)
-        };
-    });
-}
-
-function montarMensagem(cliente, template) {
-    let mensagem = String(template || '').replace(/\{\{nome\}\}/g, cliente.nome)
-        .replace(/\{\{valor\}\}/g, cliente.valor)
-        .replace(/\{\{numero\}\}/g, cliente.numero || 'não informado');
-
-    if (!template || !template.includes('{{valor}}') || !template.includes('{{nome}}')) {
-        mensagem = `Cliente: ${cliente.nome}\nNúmero: ${cliente.numero || 'não informado'}\nValor: R$ ${cliente.valor}`;
-    }
-
-    if (!template.includes('{{numero}}')) {
-        mensagem += `\n\nCliente: ${cliente.nome} \nNúmero: ${cliente.numero || 'não informado'} \nValor: R$ ${cliente.valor}`;
-    }
-
-    return mensagem;
+function isDevedor(status) {
+    if (!status) return true;
+    const texto = String(status).toLowerCase();
+    return /dev|inadimplente|pendente|em aberto|aberto|vencido|não pago|nao pago|devedor/.test(texto);
 }
 
 function lerTemplate(caminho) {
@@ -106,17 +50,88 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function confirmarPergunta(pergunta) {
+    return new Promise(resolve => {
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        rl.question(pergunta, answer => {
+            rl.close();
+            resolve(String(answer || 's').trim().toLowerCase().startsWith('s'));
+        });
+    });
+}
+
+function gerarResumo(clientes) {
+    const resumo = {
+        total: clientes.length,
+        validos: 0,
+        semTelefone: 0,
+        ignoradosNaoDevedor: 0,
+        mensagens: []
+    };
+
+    clientes.forEach(cliente => {
+        const ehDevedor = isDevedor(cliente.status);
+        const valido = !!cliente.telefoneValido && (!config.enviarSomenteDevedores || ehDevedor);
+
+        if (!cliente.telefoneValido) resumo.semTelefone += 1;
+        if (!ehDevedor && config.enviarSomenteDevedores) resumo.ignoradosNaoDevedor += 1;
+        if (valido) resumo.validos += 1;
+
+        resumo.mensagens.push({
+            nome: cliente.nome,
+            telefoneOriginal: cliente.telefoneOriginal || '',
+            telefoneValido: cliente.telefoneValido || '',
+            valor: cliente.valor,
+            status: cliente.status,
+            devedor: ehDevedor,
+            enviavel: valido
+        });
+    });
+
+    return resumo;
+}
+
 async function main() {
     const template = lerTemplate(TEMPLATE_PATH);
     const planilha = encontrarPlanilha();
     if (!planilha) {
         throw new Error('Nenhuma planilha .xlsx encontrada na pasta listas');
     }
-    const clientes = lerPlanilha(planilha);
+
+    const clientes = excel.lerPlanilha(planilha);
+    const resumo = gerarResumo(clientes);
+
+    console.log(`\nPlanilha: ${planilha}`);
+    console.log(`Total de clientes: ${resumo.total}`);
+    console.log(`Clientes com telefone válido: ${resumo.validos}`);
+    console.log(`Clientes sem telefone válido: ${resumo.semTelefone}`);
+    if (config.enviarSomenteDevedores) {
+        console.log(`Clientes ignorados por não serem devedores: ${resumo.ignoradosNaoDevedor}`);
+    }
+
+    console.log('\nPrimeiros 10 registros para validação:');
+    resumo.mensagens.slice(0, 10).forEach((item, idx) => {
+        console.log(`\n[${idx + 1}] ${item.nome}`);
+        console.log(`  Telefone original: ${item.telefoneOriginal || '---'}`);
+        console.log(`  Telefone válido: ${item.telefoneValido || '---'}`);
+        console.log(`  Valor: ${item.valor}`);
+        console.log(`  Status original: ${item.status}`);
+        console.log(`  Enviável: ${item.enviavel ? 'SIM' : 'NÃO'}`);
+        const mensagem = message.montar({
+            nome: item.nome,
+            valor: item.valor,
+            numero: item.telefoneOriginal
+        });
+        console.log(`  Mensagem de teste:\n${mensagem.replace(/\n/g, '\n    ')}`);
+    });
+
+    const enviarTeste = await confirmarPergunta('\nDeseja enviar estas mensagens de teste para o número de validação? (S/n) ');
+    if (!enviarTeste) {
+        console.log('Teste abortado pelo usuário.');
+        process.exit(0);
+    }
+
     const targetJid = formatNumberToJid(TARGET_NUMBER_RAW);
-
-    console.log(`Carregados ${clientes.length} clientes de ${planilha}`);
-
     const client = new Client({
         authStrategy: new LocalAuth({ clientId: AUTH_CLIENT_ID }),
         puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox'] }
@@ -125,6 +140,13 @@ async function main() {
     client.on('qr', qr => {
         console.log('\nQR recebido — escaneie com o WhatsApp do celular:');
         qrcode.generate(qr, { small: true });
+        try {
+            qrweb.setQr(qr);
+            qrweb.startServer();
+            qrweb.openBrowser();
+        } catch (err) {
+            console.log('Não foi possível abrir a página web do QR Code:', err.message);
+        }
     });
 
     client.on('ready', async () => {
@@ -137,16 +159,40 @@ async function main() {
                 return process.exit(1);
             }
 
-            for (let i = 0; i < clientes.length; i++) {
-                const cliente = clientes[i];
-                const mensagem = montarMensagem(cliente, template);
+            const clientesParaTeste = resumo.mensagens.filter(item => item.enviavel);
+            for (let i = 0; i < clientesParaTeste.length; i++) {
+                const info = clientesParaTeste[i];
+                const mensagem = message.montar({
+                    nome: info.nome,
+                    valor: info.valor,
+                    numero: info.telefoneOriginal
+                });
 
-                console.log(`\n[${i + 1}/${clientes.length}] Enviando para ${TARGET_NUMBER_RAW}: ${cliente.nome} | ${cliente.numero || 'sem número'} | R$ ${cliente.valor}`);
+                console.log(`\n[${i + 1}/${clientesParaTeste.length}] Enviando mensagem de teste para ${TARGET_NUMBER_RAW}: ${info.nome}`);
                 await client.sendMessage(targetJid, mensagem);
                 await sleep(1200);
             }
 
-            console.log('\nEnvio concluído para todos os clientes no número de teste.');
+            console.log('\nEnvio de teste concluído para todos os clientes válidos.');
+
+            try {
+                const resultados = clientes.map(cliente => {
+                    const ehDevedor = isDevedor(cliente.status);
+                    const enviavel = !!cliente.telefoneValido && (!config.enviarSomenteDevedores || ehDevedor);
+                    return {
+                        ...cliente,
+                        enviavel,
+                        statusEnvio: enviavel ? 'Enviado (teste)' : 'Ignorado'
+                    };
+                });
+
+                const csvPath = await report.gerarCSV(resultados);
+                const txtPath = await report.gerarTXT(resultados);
+                console.log('Relatório de teste CSV gerado em', csvPath);
+                console.log('Relatório de teste TXT gerado em', txtPath);
+            } catch (err) {
+                console.error('Erro ao gerar relatório de teste:', err.message);
+            }
         } catch (err) {
             console.error('Erro durante o envio:', err.message);
         } finally {

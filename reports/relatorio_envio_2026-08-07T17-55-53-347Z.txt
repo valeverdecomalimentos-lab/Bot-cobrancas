@@ -1,0 +1,89 @@
+Relatório de envio - 07/08/2026, 14:55:53
+
+Clientes SEM NÚMERO (para cobrança manual):
+- *Excluído * Rogerinho ( pedreiro )  |  Ignorado - Sem telefone válido
+- Alberto Beto  |  Ignorado - Sem telefone válido
+- Alexandre Xavier  |  Ignorado - Sem telefone válido
+- Ana ( Filha de Alzimar)  |  Ignorado - Sem telefone válido
+- Angela ( Irma de Zeltom )  |  Ignorado - Sem telefone válido
+- Antonio ( Barbeiro )  |  Ignorado - Sem telefone válido
+- Aparecida (Costureira)  |  Ignorado - Sem telefone válido
+- Audri (Padrinho)  |  Ignorado - Sem telefone válido
+- Cacia Pesanha  |  Ignorado - Sem telefone válido
+- Carlos Andre ( Beija-Flor)  |  Ignorado - Sem telefone válido
+- Creche Mundo Feliz  |  Ignorado - Sem telefone válido
+- D Elaine (Gari)  |  Ignorado - Sem telefone válido
+- D.Tereza  |  Ignorado - Sem telefone válido
+- D.Wilma  |  Ignorado - Sem telefone válido
+- Elizabeth Lopes  |  Ignorado - Sem telefone válido
+- Francicleia  |  Ignorado - Sem telefone válido
+- Francisco De Assis Rosa  |  Ignorado - Sem telefone válido
+- Gustavo (Prainha)  |  Ignorado - Sem telefone válido
+- hyago  |  Ignorado - Sem telefone válido
+- Irami ( costureira )  |  Ignorado - Sem telefone válido
+- Ivanildo Alves (irmão)  |  Ignorado - Sem telefone válido
+- Ivone ( Mae do Andre )  |  Ignorado - Sem telefone válido
+- Jorgete  |  Ignorado - Sem telefone válido
+- Jose Luiz Da Conceição  |  Ignorado - Sem telefone válido
+- Lili Bar  |  Ignorado - Sem telefone válido
+- Lucimara  |  Ignorado - Sem telefone válido
+- Luiz Claudio Terra - Marido da Mineira  |  Ignorado - Sem telefone válido
+- Maria Aparecida Correia (POSTO)  |  Ignorado - Sem telefone válido
+- Mauri Pinheiro  |  Ignorado - Sem telefone válido
+- Miguel Arcanjo  |  Ignorado - Sem telefone válido
+- Milce Pereira da Costa  |  Ignorado - Sem telefone válido
+- Nair Antonia Borges  |  Ignorado - Sem telefone válido
+- Pastor Claudio  |  Ignorado - Sem telefone válido
+- Pastora Irami  |  Ignorado - Sem telefone válido
+- Paula De Carvalho (Mae do Martinho)  |  Ignorado - Sem telefone válido
+- Paulo (GAROPA)  |  Ignorado - Sem telefone válido
+- Professora de yoga  |  Ignorado - Sem telefone válido
+- Rita ( De cacio)  |  Ignorado - Sem telefone válido
+- Rogerio (Pedreiro)  |  Ignorado - Sem telefone válido
+- Ronaldo Almeida Dias  |  Ignorado - Sem telefone válido
+- Sandro Jose (Pedra 90)  |  Ignorado - Sem telefone válido
+- Yara  |  Ignorado - Sem telefone válido
+
+Envios que falharam:
+- Andre Luiz ( Filho da Ivone (22) 99783-2068  |  Andre Luiz ( Filho da Ivone (22) 99783-2068  |  Erro - Não tem WhatsApp
+- Mariana Viana (22) 98166-3293  |  Mariana Viana (22) 98166-3293  |  Erro - Não tem WhatsApp
+- Netinho e Mayara (22) 9982-3856  |  Netinho e Mayara (22) 9982-3856  |  Erro de envio: No LID for user
+s (https://static.whatsapp.net/rsrc.php/v4/ys/r/FzvDHh9tHBm.js:80:180)
+- Romulo Vieira De Freitas ( Filho da Catia) (22) 98056-0001  |  Romulo Vieira De Freitas ( Filho da Catia) (22) 98056-0001  |  Erro - Não tem WhatsApp
+- Rosangela Amiga da dona da agua (22) 99970-2864  |  Rosangela Amiga da dona da agua (22) 99970-2864  |  Erro - Não tem WhatsApp
+
+Envios ENVIADOS com sucesso:
+- Alexandre e Simone (22) 99908-8850  |  Alexandre e Simone (22) 99908-8850
+- Antonia Polyana Bezerra (22) 99737-5285  |  Antonia Polyana Bezerra (22) 99737-5285
+- Armazém Beira Rio (Veve) (22) 99811-7789  |  Armazém Beira Rio (Veve) (22) 99811-7789
+- Asis Rosa (22) 99825-7465  |  Asis Rosa (22) 99825-7465
+- Athus Da Silva Filho (21) 96934-9483  |  Athus Da Silva Filho (21) 96934-9483
+- Catia Binda (Salão) (22) 99997-1518  |  Catia Binda (Salão) (22) 99997-1518
+- Cleia Donadio (22) 99900-7952  |  Cleia Donadio (22) 99900-7952
+- D. Araci (22) 98848-5536  |  D. Araci (22) 98848-5536
+- D. Sandra ( Sogra da Fabia ) (22) 99701-0080  |  D. Sandra ( Sogra da Fabia ) (22) 99701-0080
+- Efigenia (22) 98843-3596  |  Efigenia (22) 98843-3596
+- Felipe Donadio (22) 99862-8769  |  Felipe Donadio (22) 99862-8769
+- Fernanda Pessanha Rodrigues ( Filha da Heloisa ) (22) 99209-2774  |  Fernanda Pessanha Rodrigues ( Filha da Heloisa ) (22) 99209-2774
+- Gil Dazio E Claudia Mello (22) 99908-9950  |  Gil Dazio E Claudia Mello (22) 99908-9950
+- Guilherme ( Tucunare ) (22) 99943-0013  |  Guilherme ( Tucunare ) (22) 99943-0013
+- Heloisa ( Chicoria ) (22) 99812-1923  |  Heloisa ( Chicoria ) (22) 99812-1923
+- Iris Martins (22) 99722-6270  |  Iris Martins (22) 99722-6270
+- Jaciene De Jesus Santos (22) 99833-9912  |  Jaciene De Jesus Santos (22) 99833-9912
+- Jose Luiz Moureira Marques ( Nem) (22) 99962-8799  |  Jose Luiz Moureira Marques ( Nem) (22) 99962-8799
+- Jose Mauro Farias (Professor) (22) 98103-7822  |  Jose Mauro Farias (Professor) (22) 98103-7822
+- Juliana Cordeiro (Gari) (22) 99892-8825  |  Juliana Cordeiro (Gari) (22) 99892-8825
+- Julio Cesar Oliveira (Lira e Marcia) (22) 99774-1269  |  Julio Cesar Oliveira (Lira e Marcia) (22) 99774-1269
+- Marcelo ( Vinho ) (21) 96471-1503  |  Marcelo ( Vinho ) (21) 96471-1503
+- Maria Zelia Freitas Lyrios (22) 99802-9349  |  Maria Zelia Freitas Lyrios (22) 99802-9349
+- Marluce (Irma da Rosilene) (22) 99830-6880  |  Marluce (Irma da Rosilene) (22) 99830-6880
+- Matheus Gomes (22) 99899-3706  |  Matheus Gomes (22) 99899-3706
+- Maurino Andrade Silva (Robalo) (22) 99966-2537  |  Maurino Andrade Silva (Robalo) (22) 99966-2537
+- Monique Mello (21) 99742-1315  |  Monique Mello (21) 99742-1315
+- Pricila ( CIEP ) (22) 99730-7263  |  Pricila ( CIEP ) (22) 99730-7263
+- Renato Farah (22) 97400-3731  |  Renato Farah (22) 97400-3731
+- Rocio (Vizinha) (22) 99276-3835  |  Rocio (Vizinha) (22) 99276-3835
+- Rosilene Dos Santos ( Guarda - GM) (21) 98693-2601  |  Rosilene Dos Santos ( Guarda - GM) (21) 98693-2601
+- Vania Macedo (22) 99251-2521  |  Vania Macedo (22) 99251-2521
+- Vera Lucia Da Silva (22) 99987-3945  |  Vera Lucia Da Silva (22) 99987-3945
+- Walquer (Apostolo paulo) (22) 99818-3408  |  Walquer (Apostolo paulo) (22) 99818-3408
