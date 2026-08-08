@@ -19,13 +19,13 @@ function buscarTelefoneNoTexto(text) {
 
 function extrairTelefone(row, keyTelefone) {
     if (keyTelefone && row[keyTelefone]) {
-        return String(row[keyTelefone]).trim();
+        return buscarTelefoneNoTexto(String(row[keyTelefone])) || '';
     }
 
     const values = Object.values(row);
     for (const value of values) {
         const telefone = buscarTelefoneNoTexto(value);
-        if (telefone) return String(value).trim();
+        if (telefone) return telefone;
     }
 
     return "";
@@ -65,10 +65,12 @@ module.exports = {
             let nome = stripHtml(rawNome);
             let telefoneOriginal = stripHtml(rawTelefone);
 
-            if (!telefoneOriginal && rawNome) {
+            if (rawNome) {
                 const parsed = separarNomeTelefone(rawNome);
                 nome = parsed.nome;
-                telefoneOriginal = parsed.telefone;
+                if (!telefoneOriginal) {
+                    telefoneOriginal = parsed.telefone;
+                }
             }
 
             const telefoneValido = validator.formatarNumero(telefoneOriginal);

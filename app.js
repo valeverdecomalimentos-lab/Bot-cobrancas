@@ -3,6 +3,7 @@ const whatsapp = require('./core/whatsapp');
 const excel = require('./core/excel');
 const sender = require('./core/sender');
 const report = require('./core/report');
+const config = require('./config');
 const fs = require('fs');
 const path = require('path');
 
@@ -154,24 +155,39 @@ async function handleMenu(opcao) {
             const semTel = state.clientes.length - comTel;
             console.log(`\nPreparando envios: ${comTel} com telefone | ${semTel} sem telefone`);
 
-            console.log("\nIniciando envios...");
-            state.relatorioStatus = await sender.enviarMensagens(state.clientes, whatsapp.getClient());
-            console.log("\nEnvios finalizados!");
+            console.log('\nCampanhas disponíveis:');
+            Object.entries(config.campanhas).forEach(([key, campanha]) => {
+                console.log(`[${key}] ${campanha.nome}`);
+            });
 
-            try {
-                await gerarRelatorioTxt(state.relatorioStatus);
-                console.log('Relatório TXT gerado em /reports');
-            } catch (e) {
-                console.log('Erro ao gerar relatório TXT:', e.message);
-            }
-            try {
-                const csvPath = await report.gerarCSV(state.relatorioStatus);
-                console.log('Relatório CSV gerado em', csvPath);
-            } catch (e) {
-                console.log('Erro ao gerar CSV:', e.message);
-            }
+            rl.question("Escolha uma opção: ", async (campanhaOpcao) => {
+                const campanha = config.campanhas[campanhaOpcao.trim()];
+                if (!campanha) {
+                    console.log('Opção inválida. Envio cancelado.');
+                    setTimeout(showMenu, 2000);
+                    return;
+                }
 
-            setTimeout(showMenu, 3000);
+                console.log(`\nCampanha escolhida: ${campanha.nome}`);
+                console.log("\nIniciando envios...");
+                state.relatorioStatus = await sender.enviarMensagens(state.clientes, whatsapp.getClient(), campanha);
+                console.log("\nEnvios finalizados!");
+
+                try {
+                    await gerarRelatorioTxt(state.relatorioStatus);
+                    console.log('Relatório TXT gerado em /reports');
+                } catch (e) {
+                    console.log('Erro ao gerar relatório TXT:', e.message);
+                }
+                try {
+                    const csvPath = await report.gerarCSV(state.relatorioStatus);
+                    console.log('Relatório CSV gerado em', csvPath);
+                } catch (e) {
+                    console.log('Erro ao gerar CSV:', e.message);
+                }
+
+                setTimeout(showMenu, 3000);
+            });
             break;
         case '3':
             if(state.relatorioStatus.length === 0) {

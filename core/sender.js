@@ -8,7 +8,8 @@ const randomWait = () => {
 };
 
 module.exports = {
-    enviarMensagens: async (clientes, client) => {
+    enviarMensagens: async (clientes, client, campanha) => {
+        const campanhaEscolhida = campanha || (config.campanhas && config.campanhas['1']) || {};
         const resultados = [];
         let index = 1;
         const total = clientes.length;
@@ -20,7 +21,7 @@ module.exports = {
             const statusOriginal = String(cliente.status || '').toLowerCase();
             const ehDevedor = /dev|inadimplente|pendente|em aberto|aberto|vencido|não pago|nao pago/.test(statusOriginal);
 
-            if (config.enviarSomenteDevedores && !ehDevedor) {
+            if (campanhaEscolhida.somenteDevedores && !ehDevedor) {
                 console.log('⚠ Ignorado - Cliente não marcado como devedor.');
                 resultados.push({ ...cliente, statusEnvio: 'Ignorado - Não devedor' });
                 index++;
@@ -35,7 +36,7 @@ module.exports = {
                 continue;
             }
 
-            const texto = message.montar(cliente);
+            const texto = message.montar(cliente, campanhaEscolhida.template, campanhaEscolhida.mostrarRodapeContato);
 
             try {
                 const isRegistered = await client.isRegisteredUser(cliente.telefoneValido);
