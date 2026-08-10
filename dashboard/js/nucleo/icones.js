@@ -1,0 +1,32 @@
+// Conjunto mínimo de ícones em SVG puro — evita dependência de pacotes externos.
+const base = (paths, viewBox = '0 0 24 24') =>
+  `<svg width="20" height="20" viewBox="${viewBox}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+
+export const Icone = {
+  painel: base('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
+  clientes: base('<circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17.5" cy="8.5" r="2.4"/><path d="M15.7 14.2c2.9.4 4.8 2.4 4.8 5.8"/>'),
+  campanha: base('<path d="M4 11v2a2 2 0 0 0 2 2h1l3 4V5l-3 4H6a2 2 0 0 0-2 2Z"/><path d="M15 8.5c1 1 1 6 0 7M18.5 6c2 2.2 2 9.8 0 12"/>'),
+  historico: base('<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/><path d="M12 7v5l3.5 2"/>'),
+  config: base('<circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V20a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H4a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H10a1.7 1.7 0 0 0 1-1.6V4a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6 1H20a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.6 1Z"/>'),
+  saida: base('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>'),
+  cifrao: base('<path d="M12 2v20M17 6.5C17 4.6 14.8 3 12 3S7 4.6 7 6.5 9.2 9.5 12 9.5s5 1.6 5 3.9-2.2 3.6-5 3.6-5-1.4-5-3.6"/>'),
+  alerta: base('<path d="M12 3 2 20h20L12 3Z"/><path d="M12 9v5M12 17h.01"/>'),
+  relogio: base('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  seta: base('<path d="M5 12h13M13 6l6 6-6 6"/>'),
+  busca: base('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.5-4.5"/>', '0 0 22 22'),
+  upload: base('<path d="M12 15V4M12 4 8 8M12 4l4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>'),
+  check: base('<circle cx="12" cy="12" r="9.5"/><path d="M8 12.3l2.5 2.5L16 9"/>'),
+  x: base('<circle cx="12" cy="12" r="9.5"/><path d="M9 9l6 6M15 9l-6 6"/>'),
+  aviso: base('<circle cx="12" cy="12" r="9.5"/><path d="M12 8v5M12 16h.01"/>'),
+  fechar: base('<path d="M6 6l12 12M18 6 6 18"/>'),
+  planta: base('<path d="M12 21V10"/><path d="M12 10C12 6 9 4 5 4c0 4.2 2.7 7 7 7Z"/><path d="M12 13c0-4.5 3.4-6.7 7.5-6.7-.2 4.9-3.3 7.5-7.5 6.7Z"/>'),
+  play: base('<circle cx="12" cy="12" r="9.5"/><path d="M10 8.5v7l6-3.5-6-3.5Z"/>'),
+  pausa: base('<circle cx="12" cy="12" r="9.5"/><path d="M10 9v6M14 9v6"/>'),
+  baixar: base('<path d="M12 4v11M8 11l4 4 4-4"/><path d="M5 19h14"/>'),
+  usuario: base('<circle cx="12" cy="8" r="3.3"/><path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5"/>'),
+  chevronBaixo: base('<path d="M6 9l6 6 6-6"/>'),
+  editar: base('<path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16v4Z"/>'),
+  lixeira: base('<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>'),
+  menu: base('<path d="M4 7h16M4 12h16M4 17h16"/>'),
+  sparkles: base('<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/>'),
+};

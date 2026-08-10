@@ -2,14 +2,32 @@
   "name": "valeverdebot",
   "version": "1.0.0",
   "description": "Bot de Cobranca Vale Verde",
-  "main": "app.js",
+  "main": "electron-main.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "electron": "electron .",
+    "dist": "electron-builder"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.26.0",
     "xlsx": "^0.18.5"
-  }
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/valeverdecomalimentos-lab/Bot-cobrancas.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/valeverdecomalimentos-lab/Bot-cobrancas/issues"
+  },
+  "homepage": "https://github.com/valeverdecomalimentos-lab/Bot-cobrancas#readme"
 }
