@@ -13,6 +13,8 @@ const TARGET_NUMBER_RAW = '22999055666';
 const LISTAS_DIR = path.join(__dirname, 'listas');
 const TEMPLATE_PATH = path.join(__dirname, 'templates', 'cobranca.txt');
 const AUTH_CLIENT_ID = 'teste-send-monolito';
+let qrConsoleTimer = null;
+let ultimoQrRecebido = null;
 
 function encontrarPlanilha() {
     if (!fs.existsSync(LISTAS_DIR)) return null;
@@ -133,17 +135,26 @@ async function main() {
 
     const targetJid = formatNumberToJid(TARGET_NUMBER_RAW);
     const client = new Client({
-        authStrategy: new LocalAuth({ clientId: AUTH_CLIENT_ID }),
-        puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox'] }
+        authStrategy: new LocalAuth({ clientId: AUTH_CLIENT_ID })
     });
 
+    function publicarQrNoTerminal(qr) {
+        ultimoQrRecebido = qr;
+        if (qrConsoleTimer) clearTimeout(qrConsoleTimer);
+        qrConsoleTimer = setTimeout(() => {
+            if (ultimoQrRecebido !== qr) return;
+            console.log('\nQR recebido - escaneie com o WhatsApp do celular:');
+            qrcode.generate(qr, { small: true });
+        }, 180);
+        qrConsoleTimer.unref?.();
+    }
+
     client.on('qr', qr => {
-        console.log('\nQR recebido — escaneie com o WhatsApp do celular:');
-        qrcode.generate(qr, { small: true });
         try {
             qrweb.setQr(qr);
             qrweb.startServer();
             qrweb.openBrowser();
+            publicarQrNoTerminal(qr);
         } catch (err) {
             console.log('Não foi possível abrir a página web do QR Code:', err.message);
         }

@@ -1,5 +1,12 @@
 const { getTemplateByFile } = require('./templates-store');
 const { cleanText, formatMoney, getDebtAmount } = require('./customer-utils');
+const defaults = require('../config');
+const {
+    hasPixPlaceholders,
+    normalizePixSettings,
+    pixTypeLabel,
+    validatePixSettings,
+} = require('./pix');
 
 function resolveTemplate(templateFile) {
     const template = getTemplateByFile(templateFile || 'cobranca.txt');
@@ -13,7 +20,57 @@ function firstName(name) {
     return cleanText(name).split(/\s+/).filter(Boolean)[0] || '';
 }
 
-function formatMessage(cliente, templateText, mostrarRodapeContato = true) {
+function resolveFormatOptions(mostrarRodapeContato, pixSettings) {
+    if (mostrarRodapeContato && typeof mostrarRodapeContato === 'object' && !Array.isArray(mostrarRodapeContato)) {
+        const options = mostrarRodapeContato;
+        return {
+            mostrarRodapeContato: options.mostrarRodapeContato !== false,
+            pixSettings: options.pixSettings || options.pix || options,
+        };
+    }
+    return {
+        mostrarRodapeContato: mostrarRodapeContato !== false,
+        pixSettings,
+    };
+}
+
+function resolvePixSettings(pixSettings) {
+    return normalizePixSettings(pixSettings, defaults.pix || defaults);
+}
+
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replacePixPlaceholders(templateText, pixSettings) {
+    let text = String(templateText || '');
+    if (!hasPixPlaceholders(text)) return text;
+
+    const pix = resolvePixSettings(pixSettings);
+    const validation = validatePixSettings(pix);
+    if (!validation.valid) {
+        throw new Error(`Dados PIX incompletos ou invalidos. ${validation.message}`);
+    }
+
+    const replacements = {
+        '{{pix_nome_favorecido}}': pix.nomeFavorecido,
+        '{{pix_favorecido}}': pix.nomeFavorecido,
+        '{{nome_favorecido}}': pix.nomeFavorecido,
+        '{{nome_favorecido_pix}}': pix.nomeFavorecido,
+        '{{favorecido_pix}}': pix.nomeFavorecido,
+        '{{pix_chave}}': pix.chave,
+        '{{chave_pix}}': pix.chave,
+        '{{pix_tipo}}': pixTypeLabel(pix.tipo),
+        '{{tipo_chave_pix}}': pixTypeLabel(pix.tipo),
+    };
+    Object.entries(replacements).forEach(([placeholder, value]) => {
+        text = text.replace(new RegExp(escapeRegExp(placeholder), 'gi'), () => value);
+    });
+    return text;
+}
+
+function formatMessage(cliente, templateText, mostrarRodapeContato = true, pixSettings) {
+    const options = resolveFormatOptions(mostrarRodapeContato, pixSettings);
     const template = String(templateText || '').trim();
     if (!template) throw new Error('Mensagem/template vazio.');
 
@@ -21,7 +78,7 @@ function formatMessage(cliente, templateText, mostrarRodapeContato = true) {
     const numero = cleanText(cliente.numero || cliente.telefoneOriginal || cliente.telefone || '');
     const valor = formatMoney(getDebtAmount(cliente)).replace(/^R\$\s?/, '');
 
-    let mensagem = template
+    let mensagem = replacePixPlaceholders(template, options.pixSettings)
         .replace(/\{\{nome\}\}/g, nome)
         .replace(/\{\{primeiro_nome\}\}/g, firstName(nome))
         .replace(/\[cliente\]/g, nome)
@@ -37,7 +94,7 @@ function formatMessage(cliente, templateText, mostrarRodapeContato = true) {
         mensagem = `Esta e uma mensagem automatica da Vale Verde. Se voce ja pagou ou regularizou, responda esta conversa com o comprovante ou com o ajuste necessario.\n\n${mensagem}`;
     }
 
-    if (mostrarRodapeContato && !template.includes('{{numero}}') && !template.includes('{{telefone}}')) {
+    if (options.mostrarRodapeContato && !template.includes('{{numero}}') && !template.includes('{{telefone}}')) {
         mensagem += `\n\nCliente: ${nome || 'nao informado'}\nNumero: ${numero || 'nao informado'}\nValor: R$ ${valor}`;
     }
 
@@ -45,8 +102,10 @@ function formatMessage(cliente, templateText, mostrarRodapeContato = true) {
 }
 
 module.exports = {
-    montar: (cliente, templateFile = 'cobranca.txt', mostrarRodapeContato = true) => (
-        formatMessage(cliente, resolveTemplate(templateFile), mostrarRodapeContato)
+    montar: (cliente, templateFile = 'cobranca.txt', mostrarRodapeContato = true, pixSettings) => (
+        formatMessage(cliente, resolveTemplate(templateFile), mostrarRodapeContato, pixSettings)
     ),
     montarComTexto: formatMessage,
+    resolverPix: resolvePixSettings,
+    substituirPlaceholdersPix: replacePixPlaceholders,
 };

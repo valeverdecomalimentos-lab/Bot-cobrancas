@@ -1,12 +1,10 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } = require('electron');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
 app.setName('Vale Verde Dashboard');
 const userDataPath = app.getPath('userData');
-const localEnvPath = path.join(__dirname, '.env');
-if (!process.env.VALEVERDE_ENV_PATH && fs.existsSync(localEnvPath)) process.env.VALEVERDE_ENV_PATH = localEnvPath;
 const localListsPath = path.join(process.cwd(), 'listas');
 if (!process.env.VALEVERDE_LISTS_DIR && fs.existsSync(localListsPath)) process.env.VALEVERDE_LISTS_DIR = localListsPath;
 process.env.VALEVERDE_DATA_DIR ||= path.join(userDataPath, 'data');
@@ -21,22 +19,36 @@ const importer = require('./core/importer');
 const sender = require('./core/sender');
 const report = require('./core/report');
 const gemini = require('./core/gemini');
+const { AiCredentialStore } = require('./core/ai-credentials');
+const aiSpreadsheets = require('./core/ai-spreadsheets');
 const listSync = require('./core/sync-lists');
+const pixUtils = require('./core/pix');
 const defaults = require('./config');
+
+const aiCredentialStore = new AiCredentialStore({
+    filePath: process.env.VALEVERDE_AI_CREDENTIALS_PATH
+        || path.join(process.env.VALEVERDE_DATA_DIR, 'ai-credentials.json'),
+    safeStorage,
+});
+gemini.configureProviderResolver(() => aiCredentialStore.getActiveCredential());
 
 let mainWindow;
 let activeCampaign = null;
 const verifiedCampaignTests = new Map();
 const TEST_VALIDITY_MS = 60 * 60 * 1000;
 
-function messageFingerprint(message) {
-    return crypto.createHash('sha256').update(String(message || '')).digest('hex');
+function messageFingerprint(message, pix = {}) {
+    const payload = JSON.stringify({
+        mensagem: String(message || ''),
+        pix: pixUtils.normalizePixSettings(pix),
+    });
+    return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
-function getVerifiedTest(testId, message) {
+function getVerifiedTest(testId, message, pix) {
     const test = verifiedCampaignTests.get(String(testId || ''));
-    if (!test || test.expiresAt < Date.now() || test.messageHash !== messageFingerprint(message)) {
-        throw new Error('Envie um teste desta mensagem antes de liberar o disparo em massa.');
+    if (!test || test.expiresAt < Date.now() || test.messageHash !== messageFingerprint(message, pix)) {
+        throw new Error('Envie um novo teste depois de qualquer alteracao na mensagem ou nos dados PIX.');
     }
     return test;
 }
@@ -50,15 +62,75 @@ function appSettings() {
     const saved = database.getConfig();
     const min = Number(saved.intervaloMin ?? secondsFromMilliseconds(defaults.tempoMin, 5));
     const max = Number(saved.intervaloMax ?? secondsFromMilliseconds(defaults.tempoMax, 11));
+    const pixFields = pixUtils.pixSettingsWithLegacyAliases(saved, defaults.pix || defaults);
     return {
-        chavePix: String(saved.chavePix ?? defaults.PIX ?? ''),
+        ...pixFields,
         intervaloMin: Math.max(3, Math.min(min || 5, 60)),
         intervaloMax: Math.max(5, Math.min(Math.max(max || 11, min || 5), 120)),
     };
 }
 
+function aiPublicStatus() {
+    const providerNames = { gemini: 'Google Gemini', openai: 'OpenAI' };
+    let vault;
+    let configurationError = '';
+    try {
+        vault = aiCredentialStore.getPublicStatus();
+    } catch (error) {
+        configurationError = String(error?.message || 'Nao foi possivel abrir o cofre seguro de IA.');
+        vault = {
+            activeProvider: 'gemini',
+            providers: {
+                gemini: { configured: false, model: 'gemini-3.6-flash', maskedKey: '' },
+                openai: { configured: false, model: 'gpt-5.6-terra', maskedKey: '' },
+            },
+        };
+    }
+
+    const provider = ['gemini', 'openai'].includes(vault.activeProvider)
+        ? vault.activeProvider
+        : 'gemini';
+    const publicProviders = Object.fromEntries(['gemini', 'openai'].map((name) => {
+        const saved = vault.providers?.[name] || {};
+        const maskedKey = String(saved.maskedKey || '');
+        const credentialError = String(saved.error || saved.erro || '');
+        return [name, {
+            configurado: Boolean(saved.configured),
+            configured: Boolean(saved.configured),
+            modelo: String(saved.model || ''),
+            model: String(saved.model || ''),
+            chaveMascarada: maskedKey,
+            maskedKey,
+            sufixo: maskedKey.slice(-4),
+            erro: credentialError,
+            error: credentialError,
+        }];
+    }));
+    const active = publicProviders[provider];
+
+    return {
+        ...gemini.getStatus(),
+        disponivel: active.configurado && !configurationError && !active.erro,
+        provider,
+        provedor: provider,
+        provedorNome: providerNames[provider],
+        model: active.modelo,
+        modelo: active.modelo,
+        provedores: publicProviders,
+        erroConfiguracao: configurationError || active.erro,
+    };
+}
+
 async function serializeBootstrap() {
     const sincronizacao = await listSync.synchronizeLists();
+    const aiPersistida = database.getAiState();
+    const historicoGemini = gemini.getConversationHistory('dashboard', { limit: 80 }).map((message, index) => ({
+        id: `gemini-${index}-${message.createdAt || Date.now()}`,
+        papel: message.role === 'user' ? 'gestor' : 'gemini',
+        texto: String(message.text || ''),
+        criadoEm: message.createdAt || new Date().toISOString(),
+        metadados: {},
+    }));
     return {
         clientes: database.listCustomers(),
         produtos: database.listProducts(),
@@ -68,7 +140,31 @@ async function serializeBootstrap() {
         templates: templates.listTemplates(),
         configuracoes: appSettings(),
         whatsapp: whatsapp.getStatus(),
-        gemini: gemini.getStatus(),
+        gemini: {
+            ...aiPersistida,
+            ...aiPublicStatus(),
+            conversa: historicoGemini.length ? historicoGemini : aiPersistida.conversa,
+        },
+    };
+}
+
+async function aiOptions(options = {}) {
+    const whatsappStatus = whatsapp.getStatus();
+    return {
+        ...options,
+        spreadsheets: await aiSpreadsheets.loadSpreadsheetSources(listSync.LISTS_DIR),
+        runtime: {
+            whatsapp: {
+                status: whatsappStatus.status,
+                numero: whatsappStatus.numero ? 'vinculado' : '',
+                erro: Boolean(whatsappStatus.erro),
+            },
+            campaign: {
+                active: Boolean(activeCampaign),
+                paused: activeCampaign?.pausado === true,
+                cancelRequested: activeCampaign?.cancelado === true,
+            },
+        },
     };
 }
 
@@ -83,16 +179,21 @@ function validateCampaign(payload = {}) {
     const recipientIds = Array.isArray(payload.recipientIds) ? [...new Set(payload.recipientIds.map(String))] : [];
     if (!mensagem) throw new Error('A mensagem da campanha nao pode ficar vazia.');
     if (!recipientIds.length) throw new Error('Selecione pelo menos um destinatario.');
-    const test = getVerifiedTest(payload.testeId, mensagem);
-
     const settings = appSettings();
+    const pix = pixUtils.normalizePixSettings(settings.pix);
+    const test = getVerifiedTest(payload.testeId, mensagem, pix);
     const intervaloMin = Number(payload.intervaloMin ?? settings.intervaloMin);
     const intervaloMax = Number(payload.intervaloMax ?? settings.intervaloMax);
+    if (!Number.isFinite(intervaloMin) || !Number.isFinite(intervaloMax)
+        || intervaloMin < 3 || intervaloMax > 120 || intervaloMin > intervaloMax) {
+        throw new Error('Intervalo de envio invalido. Use valores entre 3 e 120 segundos.');
+    }
     return {
         tipo,
         tipoEnvio: tipo === 'cobranca' ? 'devedores' : 'todos',
         somenteDevedores: tipo === 'cobranca',
         mensagem,
+        pix,
         recipientIds,
         limiteMinimoDevedor: 50,
         tempoMin: Math.max(3000, Math.round(Math.min(intervaloMin, intervaloMax) * 1000)),
@@ -148,12 +249,33 @@ function registerIpcHandlers() {
         if (!Number.isFinite(min) || !Number.isFinite(max) || min < 3 || max > 120 || min > max) {
             throw new Error('Defina um intervalo entre 3 e 120 segundos, com minimo menor ou igual ao maximo.');
         }
+        const requestedPix = pixUtils.normalizePixSettings(input.pix || input, current.pix);
+        const pixCheck = pixUtils.validatePixSettings(requestedPix);
+        if (!pixCheck.valid) throw new Error(pixCheck.message);
         database.saveConfig({
-            chavePix: String(input.chavePix ?? current.chavePix).trim(),
+            ...pixUtils.pixSettingsWithLegacyAliases(pixCheck.pix),
             intervaloMin: Math.round(min),
             intervaloMax: Math.round(max),
         });
         return appSettings();
+    });
+
+    ipcMain.handle('ai:status', () => aiPublicStatus());
+    ipcMain.handle('ai:settings-save', async (_event, input = {}) => {
+        const candidate = aiCredentialStore.resolveCandidate(input);
+        const validation = await gemini.validateProviderCredential(candidate);
+        aiCredentialStore.save({
+            provider: candidate.provider,
+            model: validation.model || candidate.model,
+            apiKey: candidate.apiKey,
+        });
+        gemini.invalidateCaches();
+        return aiPublicStatus();
+    });
+    ipcMain.handle('ai:credential-remove', (_event, provider) => {
+        aiCredentialStore.remove(provider);
+        gemini.invalidateCaches();
+        return aiPublicStatus();
     });
 
     ipcMain.handle('templates:list', () => templates.listTemplates());
@@ -173,25 +295,30 @@ function registerIpcHandlers() {
     });
 
     ipcMain.handle('whatsapp:start', async () => {
-        whatsapp.iniciar().catch((error) => emitToRenderer('whatsapp:status', { ...whatsapp.getStatus(), erro: error.message }));
+        // O modulo persiste e publica a falha; apenas evitamos uma rejeicao sem consumidor no IPC.
+        whatsapp.iniciar().catch(() => undefined);
         return whatsapp.getStatus();
     });
     ipcMain.handle('whatsapp:status', () => whatsapp.getStatus());
+    ipcMain.handle('whatsapp:reset', () => whatsapp.resetar());
 
     ipcMain.handle('campaign:test', async (_event, input = {}) => {
         if (!whatsapp.isReady()) throw new Error('Conecte o WhatsApp antes de enviar o teste.');
         const customerExample = database.listCustomers()[0];
         if (!customerExample) throw new Error('Importe pelo menos um cliente real antes de enviar o teste.');
+        const settings = appSettings();
+        const pix = pixUtils.normalizePixSettings(settings.pix);
         const resultado = await sender.enviarTeste({
             telefone: String(input.telefone || ''),
             mensagem: String(input.mensagem || ''),
             clienteExemplo: customerExample,
+            pix,
         }, whatsapp.getClient());
         const testeId = crypto.randomUUID();
         verifiedCampaignTests.set(testeId, {
             data: new Date().toISOString(),
             expiresAt: Date.now() + TEST_VALIDITY_MS,
-            messageHash: messageFingerprint(input.mensagem),
+            messageHash: messageFingerprint(input.mensagem, pix),
         });
         return { ...resultado, testeId };
     });
@@ -237,47 +364,86 @@ function registerIpcHandlers() {
         return true;
     });
 
-    ipcMain.handle('gemini:status', () => gemini.getStatus());
-    ipcMain.handle('gemini:executive-report', () => gemini.generateExecutiveReport(
-        database.listCustomers(),
-        database.listProducts(),
-        database.listImports(),
-        database.listReports(),
-    ));
-    ipcMain.handle('gemini:ask', (_event, input = {}) => gemini.answerQuestion(
+    ipcMain.handle('gemini:status', () => aiPublicStatus());
+    ipcMain.handle('gemini:executive-report', async () => {
+        const response = await gemini.generateExecutiveReportDetailed(
+            database.listCustomers(),
+            database.listProducts(),
+            database.listImports(),
+            database.listReports(),
+            await aiOptions(),
+        );
+        database.saveAiState({ relatorio: response.texto || response.text });
+        return response;
+    });
+    ipcMain.handle('gemini:ask', async (_event, input = {}) => gemini.answerQuestionDetailed(
         database.listCustomers(),
         database.listProducts(),
         database.listImports(),
         database.listReports(),
         String(input.pergunta || ''),
         String(input.relatorioAnterior || ''),
+        await aiOptions({ sessionId: 'dashboard' }),
     ));
-    ipcMain.handle('gemini:diagnose', () => gemini.diagnoseOperations(
-        database.listCustomers(),
-        database.listProducts(),
-        database.listImports(),
-        database.listReports(),
-    ));
-    ipcMain.handle('gemini:suggest-campaign', (_event, input = {}) => gemini.suggestCampaignMessage(
+    ipcMain.handle('gemini:diagnose', async () => {
+        const response = await gemini.diagnoseOperationsDetailed(
+            database.listCustomers(),
+            database.listProducts(),
+            database.listImports(),
+            database.listReports(),
+            await aiOptions(),
+        );
+        database.saveAiState({ diagnostico: response.texto || response.text });
+        return response;
+    });
+    ipcMain.handle('gemini:suggest-campaign', async (_event, input = {}) => gemini.suggestCampaignMessageDetailed(
         database.listCustomers(),
         database.listProducts(),
         input,
+        await aiOptions(),
     ));
+    ipcMain.handle('gemini:clear-history', () => {
+        gemini.clearConversationHistory('dashboard');
+        database.clearAiConversation();
+        return true;
+    });
 }
 
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1380,
         height: 900,
-        minWidth: 1024,
-        minHeight: 700,
+        minWidth: 390,
+        minHeight: 520,
         show: false,
+        backgroundColor: '#eef3ef',
         icon: path.join(__dirname, 'logo.ico'),
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
+            sandbox: true,
             preload: path.join(__dirname, 'preload.js'),
         },
+    });
+    const abrirUrlExterna = (url) => {
+        try {
+            const parsed = new URL(url);
+            if (!['https:', 'http:', 'mailto:'].includes(parsed.protocol)) return;
+            shell.openExternal(parsed.toString()).catch(() => {});
+        } catch {
+            // Links invalidos ou protocolos internos sao ignorados.
+        }
+    };
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        abrirUrlExterna(url);
+        return { action: 'deny' };
+    });
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        const destino = String(url || '').split('#')[0];
+        const atual = String(mainWindow.webContents.getURL() || '').split('#')[0];
+        if (!atual || destino === atual) return;
+        event.preventDefault();
+        abrirUrlExterna(url);
     });
     mainWindow.once('ready-to-show', () => mainWindow.show());
     mainWindow.loadFile(path.join(__dirname, 'dashboard', 'index.html'));
@@ -287,6 +453,16 @@ app.whenReady().then(() => {
     registerIpcHandlers();
     whatsapp.on('status', (status) => emitToRenderer('whatsapp:status', status));
     createWindow();
+});
+
+let encerramentoEmAndamento = false;
+app.on('before-quit', (event) => {
+    if (encerramentoEmAndamento) return;
+    event.preventDefault();
+    encerramentoEmAndamento = true;
+    whatsapp.encerrar()
+        .catch((error) => console.error('Falha ao encerrar o WhatsApp:', error))
+        .finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => {

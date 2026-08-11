@@ -3,9 +3,6 @@ $compiledApp = Get-ChildItem (Join-Path $repoRoot 'dist\win-unpacked') -Filter '
 $electronExe = Join-Path $repoRoot 'node_modules\electron\dist\electron.exe'
 
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-if (Test-Path (Join-Path $repoRoot '.env')) {
-    $env:VALEVERDE_ENV_PATH = Join-Path $repoRoot '.env'
-}
 if (Test-Path (Join-Path $repoRoot 'listas')) {
     $env:VALEVERDE_LISTS_DIR = Join-Path $repoRoot 'listas'
 }

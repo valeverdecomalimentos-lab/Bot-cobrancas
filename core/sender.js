@@ -25,11 +25,30 @@ function resolveRecipients(clientes, campanha) {
     return filterCustomersWithPhone(normalized);
 }
 
-function resolveMessage(cliente, campanha) {
+function resolvePixSettings(campanha = {}, options = {}) {
+    if (options.pixSettings) return options.pixSettings;
+    if (options.pix) return options.pix;
+    if (campanha.pixSettings) return campanha.pixSettings;
+    if (campanha.pix) return campanha.pix;
+    if (
+        campanha.chavePix !== undefined
+        || campanha.nomeFavorecido !== undefined
+        || campanha.tipoChavePix !== undefined
+    ) return campanha;
+    return undefined;
+}
+
+function resolveMessage(cliente, campanha, options = {}) {
+    const pixSettings = resolvePixSettings(campanha, options);
     if (campanha.templateText || campanha.mensagem) {
-        return message.montarComTexto(cliente, campanha.templateText || campanha.mensagem, campanha.mostrarRodapeContato);
+        return message.montarComTexto(
+            cliente,
+            campanha.templateText || campanha.mensagem,
+            campanha.mostrarRodapeContato,
+            pixSettings,
+        );
     }
-    return message.montar(cliente, campanha.template, campanha.mostrarRodapeContato);
+    return message.montar(cliente, campanha.template, campanha.mostrarRodapeContato, pixSettings);
 }
 
 function classify(status) {
@@ -41,7 +60,8 @@ function classify(status) {
 module.exports = {
     filtrarDestinatariosCampanha: resolveRecipients,
 
-    enviarTeste: async ({ telefone, mensagem, clienteExemplo }, client) => {
+    enviarTeste: async (input = {}, client) => {
+        const { telefone, mensagem, clienteExemplo } = input;
         if (!client) throw new Error('Cliente WhatsApp indisponivel.');
         if (!clienteExemplo) throw new Error('Nenhum cliente real esta disponivel para renderizar o teste.');
         const telefoneValido = toWhatsappId(telefone);
@@ -52,7 +72,14 @@ module.exports = {
             telefoneOriginal: telefone,
         }, { keepRaw: false });
 
-        const texto = message.montarComTexto(cliente, mensagem, false);
+        const pixSettings = input.pixSettings || input.pix || (
+            input.chavePix !== undefined
+            || input.nomeFavorecido !== undefined
+            || input.tipoChavePix !== undefined
+                ? input
+                : undefined
+        );
+        const texto = message.montarComTexto(cliente, mensagem, false, pixSettings);
         const isRegistered = await client.isRegisteredUser(telefoneValido);
         if (!isRegistered) throw new Error('Numero de teste nao possui WhatsApp.');
 
@@ -78,7 +105,7 @@ module.exports = {
                 if (!cliente.telefoneValido) {
                     resultado = { ...cliente, statusEnvio: 'Ignorado - Sem telefone valido' };
                 } else {
-                    const texto = resolveMessage(cliente, campanhaEscolhida);
+                    const texto = resolveMessage(cliente, campanhaEscolhida, options);
                     const isRegistered = await client.isRegisteredUser(cliente.telefoneValido);
 
                     if (isRegistered) {

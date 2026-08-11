@@ -13,12 +13,35 @@ function ensureDir(dir) {
 
 function createEmptyDb() {
     return {
-        version: 2,
+        version: 3,
         clientes: [],
         produtos: [],
         relatorios: [],
         importacoes: [],
         configuracoes: {},
+        ia: {
+            conversa: [],
+            relatorio: '',
+            diagnostico: '',
+            atualizadaEm: null,
+        },
+    };
+}
+
+function normalizeAiState(value = {}) {
+    const source = value && typeof value === 'object' ? value : {};
+    const conversa = Array.isArray(source.conversa) ? source.conversa : [];
+    return {
+        conversa: conversa.slice(-80).map((message) => ({
+            id: String(message?.id || `ia-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+            papel: message?.papel === 'gestor' ? 'gestor' : 'gemini',
+            texto: String(message?.texto || '').slice(0, 100000),
+            criadoEm: String(message?.criadoEm || new Date().toISOString()),
+            metadados: message?.metadados && typeof message.metadados === 'object' ? message.metadados : {},
+        })).filter((message) => message.texto),
+        relatorio: String(source.relatorio || '').slice(0, 200000),
+        diagnostico: String(source.diagnostico || '').slice(0, 200000),
+        atualizadaEm: source.atualizadaEm ? String(source.atualizadaEm) : null,
     };
 }
 
@@ -31,11 +54,13 @@ function readDb() {
         return {
             ...createEmptyDb(),
             ...parsed,
+            version: Math.max(Number(parsed.version || 0), 3),
             clientes: Array.isArray(parsed.clientes) ? parsed.clientes : [],
             produtos: Array.isArray(parsed.produtos) ? parsed.produtos : [],
             relatorios: Array.isArray(parsed.relatorios) ? parsed.relatorios : [],
             importacoes: Array.isArray(parsed.importacoes) ? parsed.importacoes : [],
             configuracoes: parsed.configuracoes && typeof parsed.configuracoes === 'object' ? parsed.configuracoes : {},
+            ia: normalizeAiState(parsed.ia),
         };
     } catch (error) {
         const backup = `${DB_PATH}.corrompido-${Date.now()}`;
@@ -202,6 +227,36 @@ function saveConfig(config) {
     return db.configuracoes;
 }
 
+function getAiState() {
+    return normalizeAiState(readDb().ia);
+}
+
+function saveAiState(patch = {}) {
+    const db = readDb();
+    db.version = Math.max(Number(db.version || 0), 3);
+    db.ia = normalizeAiState({
+        ...db.ia,
+        ...(patch && typeof patch === 'object' ? patch : {}),
+        atualizadaEm: new Date().toISOString(),
+    });
+    writeDb(db);
+    return db.ia;
+}
+
+function appendAiMessages(messages = []) {
+    const current = getAiState();
+    const additions = (Array.isArray(messages) ? messages : [messages]).map((message) => ({
+        ...message,
+        id: message?.id || `ia-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        criadoEm: message?.criadoEm || new Date().toISOString(),
+    }));
+    return saveAiState({ conversa: [...current.conversa, ...additions] });
+}
+
+function clearAiConversation() {
+    return saveAiState({ conversa: [] });
+}
+
 module.exports = {
     DB_PATH,
     REPORTS_DIR,
@@ -218,4 +273,8 @@ module.exports = {
     getReport,
     getConfig,
     saveConfig,
+    getAiState,
+    saveAiState,
+    appendAiMessages,
+    clearAiConversation,
 };

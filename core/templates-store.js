@@ -4,15 +4,39 @@ const { cleanText, slugify } = require('./customer-utils');
 
 const BUNDLED_TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 const TEMPLATES_DIR = process.env.VALEVERDE_TEMPLATES_DIR || BUNDLED_TEMPLATES_DIR;
+const LEGACY_PIX_KEY = '22998628769';
+const LEGACY_PIX_BENEFICIARY = 'Israel Felipe de Oliveira Donadio';
+
+function migrateLegacyPixTemplate() {
+    if (TEMPLATES_DIR === BUNDLED_TEMPLATES_DIR) return;
+    const filePath = path.join(TEMPLATES_DIR, 'cobranca.txt');
+    if (!fs.existsSync(filePath)) return;
+
+    const current = fs.readFileSync(filePath, 'utf8');
+    if (/\{\{(?:pix_chave|chave_pix)\}\}/i.test(current)) return;
+
+    const keyPattern = new RegExp(`Chave PIX:\\s*${LEGACY_PIX_KEY}`, 'i');
+    const beneficiaryPattern = new RegExp(`Favorecido:\\s*${LEGACY_PIX_BENEFICIARY}`, 'i');
+    if (!keyPattern.test(current) || !beneficiaryPattern.test(current)) return;
+
+    const migrated = current
+        .replace(keyPattern, 'Tipo de chave: {{pix_tipo}}\n\nChave PIX: {{pix_chave}}')
+        .replace(beneficiaryPattern, 'Favorecido: {{pix_nome_favorecido}}');
+    const backupPath = `${filePath}.pre-pix-placeholders.bak`;
+    if (!fs.existsSync(backupPath)) fs.copyFileSync(filePath, backupPath);
+    fs.writeFileSync(filePath, migrated, 'utf8');
+}
 
 function ensureTemplatesDir() {
     if (!fs.existsSync(TEMPLATES_DIR)) fs.mkdirSync(TEMPLATES_DIR, { recursive: true });
     if (TEMPLATES_DIR === BUNDLED_TEMPLATES_DIR || !fs.existsSync(BUNDLED_TEMPLATES_DIR)) return;
     const hasTemplates = fs.readdirSync(TEMPLATES_DIR).some((name) => name.toLowerCase().endsWith('.txt'));
-    if (hasTemplates) return;
-    fs.readdirSync(BUNDLED_TEMPLATES_DIR)
-        .filter((name) => name.toLowerCase().endsWith('.txt'))
-        .forEach((name) => fs.copyFileSync(path.join(BUNDLED_TEMPLATES_DIR, name), path.join(TEMPLATES_DIR, name)));
+    if (!hasTemplates) {
+        fs.readdirSync(BUNDLED_TEMPLATES_DIR)
+            .filter((name) => name.toLowerCase().endsWith('.txt'))
+            .forEach((name) => fs.copyFileSync(path.join(BUNDLED_TEMPLATES_DIR, name), path.join(TEMPLATES_DIR, name)));
+    }
+    migrateLegacyPixTemplate();
 }
 
 function titleFromFile(fileName) {

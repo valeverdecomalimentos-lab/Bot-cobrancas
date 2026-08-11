@@ -1,32 +1,325 @@
-import { estado } from '../nucleo/estado.js';
+import {
+  TIPOS_CHAVE_PIX,
+  atualizarEstadoGemini,
+  configPixComAliases,
+  estado,
+  normalizarConfigPix,
+  validarConfigPix,
+} from '../nucleo/estado.js';
 import { api } from '../nucleo/pontos-integracao.js';
 import { paraElemento, abrirModal, mostrarToast, escaparHtml } from '../nucleo/ui.js';
 import { Icone } from '../nucleo/icones.js';
 
+const PROVEDORES_IA = Object.freeze({
+  gemini: {
+    nome: 'Google Gemini',
+    sigla: 'G',
+    descricao: 'Integração multimodal do Google para análises operacionais.',
+    placeholder: 'Cole sua chave Gemini',
+    modelos: [
+      { valor: 'gemini-3.6-flash', rotulo: 'Gemini 3.6 Flash', detalhe: 'Mais recente' },
+      { valor: 'gemini-3.5-flash', rotulo: 'Gemini 3.5 Flash', detalhe: 'Estável' },
+    ],
+  },
+  openai: {
+    nome: 'OpenAI',
+    sigla: 'O',
+    descricao: 'Modelos especializados para velocidade, economia ou raciocínio máximo.',
+    placeholder: 'Cole sua chave OpenAI',
+    modelos: [
+      { valor: 'gpt-5.6-terra', rotulo: 'GPT-5.6 Terra', detalhe: 'Recomendado' },
+      { valor: 'gpt-5.6-luna', rotulo: 'GPT-5.6 Luna', detalhe: 'Econômico' },
+      { valor: 'gpt-5.6-sol', rotulo: 'GPT-5.6 Sol', detalhe: 'Máximo' },
+    ],
+  },
+});
+
+function provedorIaValido(valor) {
+  return Object.hasOwn(PROVEDORES_IA, valor) ? valor : 'gemini';
+}
+
+function motivoErroApi(error, fallback) {
+  const mensagem = String(error?.message || '')
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .replace(/^(?:Error:\s*)+/i, '')
+    .trim();
+  return mensagem || fallback;
+}
+
 export function montarConfiguracoes(alvo) {
+  const pixAtual = normalizarConfigPix(estado.config);
+  const opcoesTipoPix = Object.entries(TIPOS_CHAVE_PIX).map(([valor, rotulo]) => (
+    `<option value="${valor}" ${pixAtual.tipo === valor ? 'selected' : ''}>${rotulo}</option>`
+  )).join('');
   const tela = paraElemento(`
     <div>
-      <div class="topo-pagina"><div><h1>Configuracoes</h1><p class="legenda">Preferencias persistidas para os proximos disparos.</p></div></div>
+      <div class="topo-pagina"><div><h1>Configurações</h1><p class="legenda">Preferências seguras para pagamentos e próximos disparos.</p></div></div>
+      <section class="cartao secao-config secao-config--ia" aria-labelledby="titulo-config-ia">
+        <div class="secao-config-ia__topo">
+          <div class="secao-config__cabecalho">
+            <h2 id="titulo-config-ia"><span aria-hidden="true">${Icone.sparkles}</span> Inteligência artificial</h2>
+            <p class="legenda">Escolha o provedor e o modelo do Copiloto. A chave é armazenada com proteção local e nunca volta a ser exibida.</p>
+          </div>
+          <div id="status-geral-ia" class="status-config-ia" aria-live="polite"></div>
+        </div>
+        <div id="controles-config-ia"></div>
+      </section>
       <div class="grade-config">
         <div>
           <div class="cartao secao-config">
-            <h3>${Icone.cifrao} Chave PIX</h3>
-            <div class="campo"><label for="campo-pix">Chave</label><input type="text" id="campo-pix" value="${escaparHtml(estado.config.chavePix)}"></div>
-            <button class="btn btn--primario" id="btn-salvar-config">Salvar configuracoes</button>
+            <div class="secao-config__cabecalho">
+              <h3>${Icone.cifrao} Dados para recebimento via PIX</h3>
+              <p class="legenda">Esses dados substituem automaticamente os placeholders dos templates de cobrança.</p>
+            </div>
+            <div class="grade-campos grade-campos--pix">
+              <div class="campo">
+                <label for="campo-pix-favorecido">Nome do favorecido</label>
+                <input type="text" id="campo-pix-favorecido" autocomplete="name" maxlength="120" aria-describedby="ajuda-pix-favorecido erro-pix-favorecido" value="${escaparHtml(pixAtual.nomeFavorecido)}" placeholder="Nome como aparece na conta">
+                <small id="ajuda-pix-favorecido">Use o nome do titular da conta que receberá o pagamento.</small>
+                <small id="erro-pix-favorecido" class="erro-campo" role="alert" hidden></small>
+              </div>
+              <div class="campo">
+                <label for="campo-pix-tipo">Tipo de chave</label>
+                <select id="campo-pix-tipo" aria-describedby="ajuda-pix-tipo">${opcoesTipoPix}</select>
+                <small id="ajuda-pix-tipo">Escolha o tipo correto para validarmos a chave antes do envio.</small>
+              </div>
+              <div class="campo campo--largura-total">
+                <label for="campo-pix-chave">Chave PIX</label>
+                <input type="text" id="campo-pix-chave" autocomplete="off" spellcheck="false" maxlength="140" aria-describedby="ajuda-pix-chave erro-pix-chave" value="${escaparHtml(pixAtual.chave)}">
+                <small id="ajuda-pix-chave"></small>
+                <small id="erro-pix-chave" class="erro-campo" role="alert" hidden></small>
+              </div>
+            </div>
+            <div class="resumo-config-pix" aria-live="polite">
+              <span class="resumo-config-pix__rotulo">Prévia nos avisos de cobrança</span>
+              <strong id="previa-pix-favorecido"></strong>
+              <span id="previa-pix-chave"></span>
+            </div>
           </div>
           <div class="cartao secao-config">
             <h3>${Icone.relogio} Intervalo entre mensagens</h3>
-            <div class="campo"><label for="slider-min">Minimo: <span id="rotulo-min">${estado.config.intervaloMin}s</span></label><div class="slider-wrap"><input type="range" id="slider-min" min="3" max="60" value="${estado.config.intervaloMin}"></div></div>
-            <div class="campo"><label for="slider-max">Maximo: <span id="rotulo-max">${estado.config.intervaloMax}s</span></label><div class="slider-wrap"><input type="range" id="slider-max" min="3" max="120" value="${estado.config.intervaloMax}"></div></div>
+            <div class="campo"><label for="slider-min">Mínimo: <span id="rotulo-min">${estado.config.intervaloMin}s</span></label><div class="slider-wrap"><input type="range" id="slider-min" min="3" max="60" value="${estado.config.intervaloMin}"></div></div>
+            <div class="campo"><label for="slider-max">Máximo: <span id="rotulo-max">${estado.config.intervaloMax}s</span></label><div class="slider-wrap"><input type="range" id="slider-max" min="3" max="120" value="${estado.config.intervaloMax}"></div></div>
           </div>
+          <div class="acoes-config"><button class="btn btn--primario" id="btn-salvar-config">Salvar configurações</button></div>
         </div>
-        <div><div class="cartao secao-config"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h3>${Icone.editar} Templates salvos</h3><div style="display:flex;gap:6px"><button class="btn btn--fantasma" id="btn-importar-template" title="Importar template TXT">${Icone.upload}</button><button class="btn btn--fantasma" id="btn-novo-template" title="Novo template">${Icone.adicionar}</button></div></div><div id="lista-templates"></div></div></div>
+        <div><div class="cartao secao-config"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h3>${Icone.editar} Templates salvos</h3><div style="display:flex;gap:6px"><button class="btn btn--fantasma" id="btn-importar-template" type="button" aria-label="Importar template TXT" title="Importar template TXT">${Icone.upload}</button><button class="btn btn--fantasma" id="btn-novo-template" type="button" aria-label="Criar novo template" title="Novo template">${Icone.adicionar}</button></div></div><div id="lista-templates"></div></div></div>
       </div>
     </div>`);
   alvo.appendChild(tela);
-  const campoPix = tela.querySelector('#campo-pix');
+  const campoPixFavorecido = tela.querySelector('#campo-pix-favorecido');
+  const campoPixTipo = tela.querySelector('#campo-pix-tipo');
+  const campoPixChave = tela.querySelector('#campo-pix-chave');
   const sliderMin = tela.querySelector('#slider-min');
   const sliderMax = tela.querySelector('#slider-max');
+  const botaoSalvar = tela.querySelector('#btn-salvar-config');
+  const controlesConfigIa = tela.querySelector('#controles-config-ia');
+  const statusGeralIa = tela.querySelector('#status-geral-ia');
+  let provedorSelecionado = provedorIaValido(estado.gemini.provedor);
+  let operacaoIa = '';
+  let erroStatusIa = '';
+
+  function dadosPublicosProvedor(provedor) {
+    return estado.gemini.provedores?.[provedor] || { configurado: false, sufixo: '', modelo: null };
+  }
+
+  function atualizarStatusGeralIa() {
+    if (estado.gemini.erroConfiguracao) {
+      statusGeralIa.innerHTML = `<span class="badge badge--erro">Cofre indisponível</span><small>${escaparHtml(estado.gemini.erroConfiguracao)}</small>`;
+      return;
+    }
+    if (estado.gemini.disponivel) {
+      const nome = estado.gemini.provedorNome || PROVEDORES_IA[provedorIaValido(estado.gemini.provedor)].nome;
+      statusGeralIa.innerHTML = `<span class="badge badge--sucesso">Copiloto ativo</span><small>${escaparHtml(nome)}${estado.gemini.modelo ? ` · ${escaparHtml(estado.gemini.modelo)}` : ''}</small>`;
+      return;
+    }
+    statusGeralIa.innerHTML = '<span class="badge badge--neutro">Não configurado</span><small>Escolha um provedor para ativar o Copiloto</small>';
+  }
+
+  function renderizarConfigIa({ focoNoProvedor = false } = {}) {
+    atualizarStatusGeralIa();
+    const definicao = PROVEDORES_IA[provedorSelecionado];
+    const credencial = dadosPublicosProvedor(provedorSelecionado);
+    const modeloAtual = String(
+      credencial.modelo
+      || (estado.gemini.provedor === provedorSelecionado ? estado.gemini.modelo : '')
+      || definicao.modelos[0].valor,
+    );
+    const ocupado = Boolean(operacaoIa);
+    const credencialTexto = credencial.erro
+      ? `Credencial indisponível: ${escaparHtml(credencial.erro)}`
+      : credencial.configurado
+      ? `Chave configurada${credencial.sufixo ? ` · final •••• ${escaparHtml(credencial.sufixo)}` : ''}`
+      : 'Nenhuma chave cadastrada';
+
+    controlesConfigIa.innerHTML = `
+      <fieldset class="seletor-provedor-ia" ${ocupado ? 'disabled' : ''}>
+        <legend>Provedor do Copiloto</legend>
+        <div class="grade-provedores-ia">
+          ${Object.entries(PROVEDORES_IA).map(([id, provedor]) => {
+            const dados = dadosPublicosProvedor(id);
+            return `<label class="opcao-provedor-ia ${id === provedorSelecionado ? 'selecionada' : ''}">
+              <input type="radio" name="provedor-ia" value="${id}" ${id === provedorSelecionado ? 'checked' : ''} aria-describedby="descricao-provedor-${id}">
+              <span class="marca-provedor-ia" aria-hidden="true">${provedor.sigla}</span>
+              <span class="opcao-provedor-ia__texto"><strong>${provedor.nome}</strong><small id="descricao-provedor-${id}">${provedor.descricao}</small></span>
+              <span class="estado-provedor-ia ${dados.configurado && !dados.erro ? 'configurado' : ''}">${dados.erro ? 'Verificar cofre' : dados.configurado ? `Configurado${dados.sufixo ? ` · •••• ${escaparHtml(dados.sufixo)}` : ''}` : 'Configurar'}</span>
+            </label>`;
+          }).join('')}
+        </div>
+      </fieldset>
+      <div class="config-ia-formulario">
+        <div class="campo">
+          <label for="campo-modelo-ia">Modelo</label>
+          <select id="campo-modelo-ia" ${ocupado ? 'disabled' : ''}>
+            ${definicao.modelos.map((modelo) => `<option value="${modelo.valor}" ${modelo.valor === modeloAtual ? 'selected' : ''}>${modelo.rotulo} — ${modelo.detalhe}</option>`).join('')}
+          </select>
+          <small>Você pode trocar o modelo sem informar novamente uma chave já configurada.</small>
+        </div>
+        <div class="campo">
+          <label for="campo-chave-ia">Chave de API</label>
+          <div class="campo-chave-ia">
+            <input type="password" id="campo-chave-ia" autocomplete="new-password" spellcheck="false" maxlength="512" placeholder="${credencial.configurado ? 'Deixe vazio para manter a chave atual' : definicao.placeholder}" aria-describedby="ajuda-chave-ia erro-chave-ia" ${ocupado ? 'disabled' : ''}>
+            <button class="btn btn--fantasma alternar-chave-ia" id="btn-alternar-chave-ia" type="button" aria-controls="campo-chave-ia" aria-pressed="false" ${ocupado ? 'disabled' : ''}>Mostrar</button>
+          </div>
+          <small id="ajuda-chave-ia"><span class="indicador-credencial-ia ${credencial.configurado ? 'configurada' : ''}">${credencialTexto}</span>. Uma chave vazia preserva a credencial existente.</small>
+          <small id="erro-chave-ia" class="erro-campo" role="alert" ${erroStatusIa ? '' : 'hidden'}>${escaparHtml(erroStatusIa)}</small>
+        </div>
+      </div>
+      <div class="acoes-config-ia">
+        ${credencial.configurado ? '<button class="btn btn--fantasma btn-remover-credencial" id="btn-remover-chave-ia" type="button">Remover chave</button>' : '<span></span>'}
+        <button class="btn btn--primario" id="btn-salvar-ia" type="button" ${ocupado ? 'disabled aria-disabled="true" aria-busy="true"' : ''}>${operacaoIa === 'salvando' ? 'Testando conexão...' : operacaoIa === 'removendo' ? 'Atualizando...' : 'Aplicar e testar conexão'}</button>
+      </div>`;
+
+    controlesConfigIa.querySelectorAll('input[name="provedor-ia"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        provedorSelecionado = provedorIaValido(radio.value);
+        erroStatusIa = '';
+        renderizarConfigIa({ focoNoProvedor: true });
+      });
+    });
+
+    const campoChave = controlesConfigIa.querySelector('#campo-chave-ia');
+    const botaoAlternarChave = controlesConfigIa.querySelector('#btn-alternar-chave-ia');
+    campoChave?.addEventListener('input', () => {
+      erroStatusIa = '';
+      campoChave.removeAttribute('aria-invalid');
+      const erro = controlesConfigIa.querySelector('#erro-chave-ia');
+      if (erro) {
+        erro.hidden = true;
+        erro.textContent = '';
+      }
+    });
+    botaoAlternarChave?.addEventListener('click', () => {
+      const revelar = campoChave.type === 'password';
+      campoChave.type = revelar ? 'text' : 'password';
+      botaoAlternarChave.textContent = revelar ? 'Ocultar' : 'Mostrar';
+      botaoAlternarChave.setAttribute('aria-pressed', String(revelar));
+      botaoAlternarChave.setAttribute('aria-label', `${revelar ? 'Ocultar' : 'Mostrar'} chave de API`);
+      campoChave.focus();
+    });
+
+    controlesConfigIa.querySelector('#btn-salvar-ia')?.addEventListener('click', async () => {
+      const apiKey = campoChave.value.trim();
+      const credencialAtual = dadosPublicosProvedor(provedorSelecionado);
+      if (!apiKey && !credencialAtual.configurado) {
+        erroStatusIa = `Informe uma chave de API da ${PROVEDORES_IA[provedorSelecionado].nome}.`;
+        campoChave.setAttribute('aria-invalid', 'true');
+        const erro = controlesConfigIa.querySelector('#erro-chave-ia');
+        erro.textContent = erroStatusIa;
+        erro.hidden = false;
+        campoChave.focus();
+        return;
+      }
+
+      operacaoIa = 'salvando';
+      erroStatusIa = '';
+      const provider = provedorSelecionado;
+      const model = controlesConfigIa.querySelector('#campo-modelo-ia').value;
+      renderizarConfigIa();
+      try {
+        const status = await api.saveAiSettings({ provider, model, apiKey });
+        atualizarEstadoGemini(status);
+        provedorSelecionado = provedorIaValido(status?.provedor || provider);
+        mostrarToast(`${PROVEDORES_IA[provider].nome} conectado ao Copiloto.`, 'sucesso');
+      } catch (error) {
+        erroStatusIa = motivoErroApi(error, 'Não foi possível validar esta chave. Confira a credencial e tente novamente.');
+        mostrarToast(erroStatusIa, 'erro');
+      } finally {
+        operacaoIa = '';
+        if (tela.isConnected) renderizarConfigIa();
+      }
+    });
+
+    controlesConfigIa.querySelector('#btn-remover-chave-ia')?.addEventListener('click', async () => {
+      const provider = provedorSelecionado;
+      if (!window.confirm(`Remover a chave da ${PROVEDORES_IA[provider].nome}? O Copiloto deixará de usar esse provedor.`)) return;
+      operacaoIa = 'removendo';
+      erroStatusIa = '';
+      renderizarConfigIa();
+      try {
+        atualizarEstadoGemini(await api.removeAiCredential(provider));
+        mostrarToast(`Chave da ${PROVEDORES_IA[provider].nome} removida.`, 'sucesso');
+      } catch (error) {
+        erroStatusIa = motivoErroApi(error, 'Não foi possível remover a chave.');
+        mostrarToast(erroStatusIa, 'erro');
+      } finally {
+        operacaoIa = '';
+        if (tela.isConnected) renderizarConfigIa();
+      }
+    });
+
+    if (focoNoProvedor) {
+      requestAnimationFrame(() => controlesConfigIa.querySelector(`input[value="${provedorSelecionado}"]`)?.focus());
+    }
+  }
+
+  renderizarConfigIa();
+  if (typeof api.getAiStatus === 'function') {
+    api.getAiStatus().then((status) => {
+      atualizarEstadoGemini(status);
+      provedorSelecionado = provedorIaValido(status?.provedor || provedorSelecionado);
+      if (tela.isConnected) renderizarConfigIa();
+    }).catch((error) => {
+      erroStatusIa = motivoErroApi(error, 'Não foi possível consultar o estado da IA.');
+      if (tela.isConnected) renderizarConfigIa();
+    });
+  }
+
+  const dicasChave = {
+    cpf: { placeholder: '000.000.000-00', inputMode: 'numeric', texto: 'Digite os 11 números do CPF; pontuação é opcional.' },
+    cnpj: { placeholder: '00.000.000/0000-00', inputMode: 'numeric', texto: 'Digite os 14 números do CNPJ; pontuação é opcional.' },
+    email: { placeholder: 'financeiro@empresa.com.br', inputMode: 'email', texto: 'Informe o e-mail completo cadastrado como chave PIX.' },
+    telefone: { placeholder: '+55 (22) 99999-9999', inputMode: 'tel', texto: 'Inclua DDD e, de preferência, o código do país (+55).' },
+    aleatoria: { placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', inputMode: 'text', texto: 'Cole a chave aleatória completa fornecida pelo banco.' },
+  };
+
+  function lerPixFormulario() {
+    return normalizarConfigPix({
+      pix: {
+        nomeFavorecido: campoPixFavorecido.value,
+        chave: campoPixChave.value,
+        tipo: campoPixTipo.value,
+      },
+    });
+  }
+
+  function limparErro(campo, erro) {
+    campo.removeAttribute('aria-invalid');
+    erro.hidden = true;
+    erro.textContent = '';
+  }
+
+  function atualizarPreviaPix() {
+    const pix = lerPixFormulario();
+    const dica = dicasChave[pix.tipo] || dicasChave.aleatoria;
+    campoPixChave.placeholder = dica.placeholder;
+    campoPixChave.inputMode = dica.inputMode;
+    tela.querySelector('#ajuda-pix-chave').textContent = dica.texto;
+    tela.querySelector('#previa-pix-favorecido').textContent = pix.nomeFavorecido || 'Nome do favorecido não informado';
+    tela.querySelector('#previa-pix-chave').textContent = pix.chave
+      ? `${TIPOS_CHAVE_PIX[pix.tipo]} · ${pix.chave}`
+      : 'Chave PIX não informada';
+  }
 
   function atualizarRotulos() {
     const min = Number(sliderMin.value);
@@ -38,12 +331,64 @@ export function montarConfiguracoes(alvo) {
 
   sliderMin.addEventListener('input', atualizarRotulos);
   sliderMax.addEventListener('input', atualizarRotulos);
-  tela.querySelector('#btn-salvar-config').addEventListener('click', async () => {
+  campoPixFavorecido.addEventListener('input', () => {
+    limparErro(campoPixFavorecido, tela.querySelector('#erro-pix-favorecido'));
+    atualizarPreviaPix();
+  });
+  campoPixChave.addEventListener('input', () => {
+    limparErro(campoPixChave, tela.querySelector('#erro-pix-chave'));
+    atualizarPreviaPix();
+  });
+  campoPixTipo.addEventListener('change', () => {
+    limparErro(campoPixChave, tela.querySelector('#erro-pix-chave'));
+    atualizarPreviaPix();
+  });
+  atualizarRotulos();
+  atualizarPreviaPix();
+
+  botaoSalvar.addEventListener('click', async () => {
+    const validacaoPix = validarConfigPix({ pix: lerPixFormulario() });
+    const erroFavorecido = tela.querySelector('#erro-pix-favorecido');
+    const erroChave = tela.querySelector('#erro-pix-chave');
+    limparErro(campoPixFavorecido, erroFavorecido);
+    limparErro(campoPixChave, erroChave);
+    if (!validacaoPix.valido) {
+      if (validacaoPix.erros.nomeFavorecido) {
+        campoPixFavorecido.setAttribute('aria-invalid', 'true');
+        erroFavorecido.textContent = validacaoPix.erros.nomeFavorecido;
+        erroFavorecido.hidden = false;
+      }
+      if (validacaoPix.erros.chave) {
+        campoPixChave.setAttribute('aria-invalid', 'true');
+        erroChave.textContent = validacaoPix.erros.chave;
+        erroChave.hidden = false;
+      }
+      (validacaoPix.erros.nomeFavorecido ? campoPixFavorecido : campoPixChave).focus();
+      mostrarToast(validacaoPix.mensagem, 'erro');
+      return;
+    }
+
+    const aliasesPix = configPixComAliases(validacaoPix.pix);
+    const payload = {
+      ...aliasesPix,
+      intervaloMin: Number(sliderMin.value),
+      intervaloMax: Number(sliderMax.value),
+    };
+    const textoOriginal = botaoSalvar.textContent;
+    botaoSalvar.disabled = true;
+    botaoSalvar.textContent = 'Salvando...';
     try {
-      estado.config = { ...estado.config, ...await api.saveSettings({ chavePix: campoPix.value, intervaloMin: Number(sliderMin.value), intervaloMax: Number(sliderMax.value) }) };
-      mostrarToast('Configuracoes salvas', 'sucesso');
+      const salvas = await api.saveSettings(payload);
+      const configMesclada = { ...estado.config, ...payload, ...(salvas || {}) };
+      estado.config = { ...configMesclada, ...configPixComAliases(configMesclada) };
+      mostrarToast('Dados PIX e preferências salvos.', 'sucesso');
     } catch (error) {
-      mostrarToast(error.message || 'Nao foi possivel salvar as configuracoes.', 'erro');
+      mostrarToast(error.message || 'Não foi possível salvar as configurações.', 'erro');
+    } finally {
+      if (botaoSalvar.isConnected) {
+        botaoSalvar.disabled = false;
+        botaoSalvar.textContent = textoOriginal;
+      }
     }
   });
 
@@ -58,7 +403,7 @@ export function montarConfiguracoes(alvo) {
       return;
     }
     listaTemplates.innerHTML = estado.config.templates.map((template) => `
-      <div class="linha-template"><span>${escaparHtml(template.nome)}</span><span style="display:flex;gap:4px"><button class="btn btn--fantasma" data-editar="${escaparHtml(template.id)}" title="Editar">${Icone.editar}</button><button class="btn btn--fantasma" data-excluir="${escaparHtml(template.id)}" title="Excluir">${Icone.lixeira}</button></span></div>`).join('');
+      <div class="linha-template"><span>${escaparHtml(template.nome)}</span><span style="display:flex;gap:4px"><button class="btn btn--fantasma" type="button" data-editar="${escaparHtml(template.id)}" aria-label="Editar template ${escaparHtml(template.nome)}" title="Editar">${Icone.editar}</button><button class="btn btn--fantasma" type="button" data-excluir="${escaparHtml(template.id)}" aria-label="Excluir template ${escaparHtml(template.nome)}" title="Excluir">${Icone.lixeira}</button></span></div>`).join('');
   }
   renderizarTemplates();
   tela.querySelector('#btn-novo-template').addEventListener('click', () => abrirEditorTemplate(atualizarTemplates));
@@ -80,12 +425,17 @@ export function montarConfiguracoes(alvo) {
       abrirEditorTemplate(atualizarTemplates, template);
     }
     if (excluir) {
+      const template = estado.config.templates.find((item) => String(item.id) === String(excluir.dataset.excluir));
+      if (!confirm(`Excluir o template "${template?.nome || 'selecionado'}"? Esta ação não pode ser desfeita.`)) return;
       try {
+        excluir.disabled = true;
         await api.deleteTemplate(excluir.dataset.excluir);
         await atualizarTemplates();
         mostrarToast('Template excluido', 'aviso');
       } catch (error) {
         mostrarToast(error.message || 'Nao foi possivel excluir o template.', 'erro');
+      } finally {
+        if (excluir.isConnected) excluir.disabled = false;
       }
     }
   });
@@ -94,7 +444,7 @@ export function montarConfiguracoes(alvo) {
 function abrirEditorTemplate(aoSalvar, templateExistente) {
   const { elemento, fechar } = abrirModal({
     titulo: templateExistente ? 'Editar template' : 'Novo template',
-    corpoHtml: `<div class="campo"><label for="nome-tpl">Nome</label><input type="text" id="nome-tpl" value="${escaparHtml(templateExistente?.nome)}"></div><div class="campo"><label for="texto-tpl">Mensagem</label><textarea id="texto-tpl" rows="7">${escaparHtml(templateExistente?.texto)}</textarea></div>`,
+    corpoHtml: `<div class="campo"><label for="nome-tpl">Nome</label><input type="text" id="nome-tpl" value="${escaparHtml(templateExistente?.nome)}"></div><div class="campo"><label for="texto-tpl">Mensagem</label><textarea id="texto-tpl" rows="9" aria-describedby="ajuda-placeholders-tpl">${escaparHtml(templateExistente?.texto)}</textarea><small id="ajuda-placeholders-tpl">Dados PIX disponíveis: {{pix_nome_favorecido}}, {{pix_chave}} e {{pix_tipo}}. Eles são preenchidos apenas no envio.</small></div>`,
     rodapeHtml: '<button class="btn btn--secundario" data-cancelar>Cancelar</button><button class="btn btn--primario" data-salvar>Salvar</button>',
   });
   elemento.querySelector('[data-cancelar]').addEventListener('click', fechar);

@@ -139,9 +139,13 @@ async function readSpreadsheetRows(filePath) {
     }
 
     const workbook = readWorkbook(filePath);
-    const firstSheetName = workbook.SheetNames[0];
-    if (!firstSheetName) return [];
-    return rowsFromSheet(workbook.Sheets[firstSheetName]);
+    const sheetNames = Array.isArray(workbook.SheetNames) ? workbook.SheetNames : [];
+    if (!sheetNames.length) return [];
+
+    const includeSheetName = sheetNames.length > 1;
+    return sheetNames.flatMap((sheetName) => rowsFromSheet(workbook.Sheets[sheetName]).map((row) => (
+        includeSheetName ? { ...row, __aba: sheetName } : row
+    )));
 }
 
 module.exports = {

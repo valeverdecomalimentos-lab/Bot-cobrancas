@@ -6,9 +6,11 @@ Lembrete de saldo em aberto com a Vale Verde: R$ {{valor}}.
 
 Dados para Pagamento (PIX):
 
-Chave PIX: 22998628769
+Tipo de chave: {{pix_tipo}}
 
-Favorecido: Israel Felipe de Oliveira Donadio
+Chave PIX: {{pix_chave}}
+
+Favorecido: {{pix_nome_favorecido}}
 
 Valor: R$ {{valor}}
 
