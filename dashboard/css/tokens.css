@@ -4,12 +4,14 @@
   --vv-musgo:#3E6650;
   --vv-sálvia:#7FA382;
   --vv-broto:#C7DDBB;
-  --vv-creme:#F7F4EC;
-  --vv-papel:#FDFCF8;
+  --vv-creme:#E7EEE7;
+  --vv-papel:rgba(255,255,255,.58);
+  --vv-vidro-forte:rgba(255,255,255,.72);
+  --vv-vidro-borda:rgba(255,255,255,.82);
   --vv-terra:#8A6A4B;
   --vv-texto:#22281F;
   --vv-texto-sutil:#5B6459;
-  --vv-linha:#E2DFD2;
+  --vv-linha:rgba(37,67,48,.16);
 
   --vv-sucesso:#3E6650;
   --vv-sucesso-bg:#E7EFE3;
@@ -20,27 +22,28 @@
   --vv-neutro:#8B9088;
   --vv-neutro-bg:#EAEAE4;
 
-  --vv-fonte-titulo:'Fraunces',Georgia,serif;
+  --vv-fonte-titulo:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
   --vv-fonte-corpo:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
 
-  --vv-raio:14px;
+  --vv-raio:12px;
   --vv-raio-sm:8px;
-  --vv-sombra:0 1px 2px rgba(31,59,46,.06),0 6px 20px -8px rgba(31,59,46,.16);
-  --vv-sombra-lg:0 12px 40px -12px rgba(31,59,46,.28);
-  --vv-transicao:.18s cubic-bezier(.4,0,.2,1);
+  --vv-sombra:0 1px 2px rgba(31,59,46,.05),0 16px 38px -22px rgba(31,59,46,.34);
+  --vv-sombra-lg:0 28px 72px -28px rgba(31,59,46,.42);
+  --vv-transicao:.2s cubic-bezier(.2,.7,.2,1);
 }
 
 *,*::before,*::after{box-sizing:border-box}
 html,body{height:100%}
 body{
   margin:0;
-  background:var(--vv-creme);
+  background:linear-gradient(145deg,#eef4f1 0%,#e1ebea 52%,#edf0f5 100%);
   color:var(--vv-texto);
   font-family:var(--vv-fonte-corpo);
   -webkit-font-smoothing:antialiased;
 }
-h1,h2,h3{font-family:var(--vv-fonte-titulo);font-weight:600;margin:0;color:var(--vv-floresta)}
+h1,h2,h3{font-family:var(--vv-fonte-titulo);font-weight:700;margin:0;color:var(--vv-floresta)}
 p{margin:0}
+strong{font-weight:750;color:var(--vv-floresta)}
 button{font-family:inherit}
 :focus-visible{outline:2px solid var(--vv-musgo);outline-offset:2px}
 @media (prefers-reduced-motion: reduce){*{animation-duration:.001ms !important;transition-duration:.001ms !important}}
@@ -58,23 +61,23 @@ button{font-family:inherit}
   cursor:pointer;transition:transform var(--vv-transicao),box-shadow var(--vv-transicao),background var(--vv-transicao);
 }
 .btn:active{transform:scale(.97)}
-.btn--primario{background:var(--vv-floresta);color:var(--vv-papel)}
-.btn--primario:hover{background:var(--vv-musgo)}
-.btn--secundario{background:var(--vv-papel);color:var(--vv-floresta);border:1px solid var(--vv-linha)}
-.btn--secundario:hover{border-color:var(--vv-musgo)}
+.btn--primario{background:rgba(31,59,46,.94);color:#fff;box-shadow:0 8px 18px -14px rgba(18,46,35,.8)}
+.btn--primario:hover{background:var(--vv-musgo);box-shadow:0 12px 24px -16px rgba(18,46,35,.85)}
+.btn--secundario{background:rgba(255,255,255,.52);color:var(--vv-floresta);border:1px solid var(--vv-vidro-borda);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%)}
+.btn--secundario:hover{border-color:rgba(62,102,80,.42);background:rgba(255,255,255,.72)}
 .btn--perigo{background:var(--vv-erro);color:#fff}
 .btn--perigo:hover{opacity:.9}
 .btn--fantasma{background:transparent;color:var(--vv-texto-sutil)}
 .btn--fantasma:hover{color:var(--vv-floresta)}
 .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
 
-.cartao{background:var(--vv-papel);border:1px solid var(--vv-linha);border-radius:var(--vv-raio);box-shadow:var(--vv-sombra)}
+.cartao{background:linear-gradient(135deg,rgba(255,255,255,.72),rgba(255,255,255,.44));border:1px solid var(--vv-vidro-borda);border-radius:var(--vv-raio);box-shadow:var(--vv-sombra),inset 0 1px 0 rgba(255,255,255,.72);backdrop-filter:blur(28px) saturate(145%);-webkit-backdrop-filter:blur(28px) saturate(145%)}
 
 input[type=text],input[type=number],input[type=password],input[type=search],textarea,select{
   font-family:inherit;font-size:14.5px;padding:10px 12px;border:1px solid var(--vv-linha);border-radius:var(--vv-raio-sm);
-  background:var(--vv-papel);color:var(--vv-texto);width:100%;transition:border-color var(--vv-transicao);
+  background:rgba(255,255,255,.64);color:var(--vv-texto);width:100%;transition:border-color var(--vv-transicao),box-shadow var(--vv-transicao),background var(--vv-transicao);
 }
-input:focus,textarea:focus,select:focus{border-color:var(--vv-musgo)}
+input:focus,textarea:focus,select:focus{border-color:var(--vv-musgo);box-shadow:0 0 0 3px rgba(62,102,80,.12)}
 label{font-size:13px;font-weight:600;color:var(--vv-texto-sutil);display:block;margin-bottom:6px}
 
 ::-webkit-scrollbar{width:10px;height:10px}

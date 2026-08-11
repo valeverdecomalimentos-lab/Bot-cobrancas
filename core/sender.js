@@ -1,68 +1,115 @@
 const message = require('./message');
 const config = require('../config');
+const {
+    DEBTOR_THRESHOLD,
+    filterDebtorsThreshold,
+    filterCustomersWithPhone,
+    normalizeCustomer,
+    normalizePhoneDigits,
+    toWhatsappId,
+} = require('./customer-utils');
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-const randomWait = () => {
-    const time = Math.floor(Math.random() * (config.tempoMax - config.tempoMin + 1)) + config.tempoMin;
-    return time;
-};
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function randomWait(min = config.tempoMin, max = config.tempoMax) {
+    const safeMin = Number(min || 0);
+    const safeMax = Math.max(Number(max || safeMin), safeMin);
+    return Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
+}
+
+function resolveRecipients(clientes, campanha) {
+    const normalized = clientes.map((cliente) => normalizeCustomer(cliente, { keepRaw: false })).filter(Boolean);
+    if (campanha.somenteDevedores || campanha.tipoEnvio === 'devedores' || campanha.tipo === 'cobranca') {
+        return filterDebtorsThreshold(normalized, campanha.limiteMinimoDevedor ?? DEBTOR_THRESHOLD);
+    }
+    return filterCustomersWithPhone(normalized);
+}
+
+function resolveMessage(cliente, campanha) {
+    if (campanha.templateText || campanha.mensagem) {
+        return message.montarComTexto(cliente, campanha.templateText || campanha.mensagem, campanha.mostrarRodapeContato);
+    }
+    return message.montar(cliente, campanha.template, campanha.mostrarRodapeContato);
+}
+
+function classify(status) {
+    if (/^Enviado/i.test(status)) return 'enviado';
+    if (/^Ignorado/i.test(status)) return 'ignorado';
+    return 'erro';
+}
 
 module.exports = {
-    enviarMensagens: async (clientes, client, campanha) => {
-        const campanhaEscolhida = campanha || (config.campanhas && config.campanhas['1']) || {};
+    filtrarDestinatariosCampanha: resolveRecipients,
+
+    enviarTeste: async ({ telefone, mensagem, clienteExemplo }, client) => {
+        if (!client) throw new Error('Cliente WhatsApp indisponivel.');
+        if (!clienteExemplo) throw new Error('Nenhum cliente real esta disponivel para renderizar o teste.');
+        const telefoneValido = toWhatsappId(telefone);
+        if (!telefoneValido) throw new Error('Telefone de teste invalido.');
+        const cliente = normalizeCustomer({
+            ...clienteExemplo,
+            telefone,
+            telefoneOriginal: telefone,
+        }, { keepRaw: false });
+
+        const texto = message.montarComTexto(cliente, mensagem, false);
+        const isRegistered = await client.isRegisteredUser(telefoneValido);
+        if (!isRegistered) throw new Error('Numero de teste nao possui WhatsApp.');
+
+        await client.sendMessage(telefoneValido, texto);
+        return { statusEnvio: 'Enviado (teste)', telefoneValido };
+    },
+
+    enviarMensagens: async (clientes, client, campanha = {}, options = {}) => {
+        const campanhaEscolhida = campanha || {};
+        const candidatos = resolveRecipients(clientes, campanhaEscolhida);
         const resultados = [];
-        let index = 1;
-        const total = clientes.length;
+        const total = candidatos.length;
 
-        for (const cliente of clientes) {
-            console.log(`\nCliente ${index}/${total}`);
-            console.log(`Processando: ${cliente.nome}...`);
+        for (let i = 0; i < total; i += 1) {
+            if (options.shouldCancel?.()) break;
+            while (options.shouldPause?.()) await sleep(400);
 
-            const statusOriginal = String(cliente.status || '').toLowerCase();
-            const ehDevedor = /dev|inadimplente|pendente|em aberto|aberto|vencido|não pago|nao pago/.test(statusOriginal);
-
-            if (campanhaEscolhida.somenteDevedores && !ehDevedor) {
-                console.log('⚠ Ignorado - Cliente não marcado como devedor.');
-                resultados.push({ ...cliente, statusEnvio: 'Ignorado - Não devedor' });
-                index++;
-                continue;
-            }
-
-            if (!cliente.telefoneValido) {
-                const motivo = config.ignorarSemTelefone ? 'Ignorado - Sem telefone válido' : 'Sem telefone válido';
-                console.log(`❌ ${motivo}.`);
-                resultados.push({ ...cliente, statusEnvio: motivo });
-                index++;
-                continue;
-            }
-
-            const texto = message.montar(cliente, campanhaEscolhida.template, campanhaEscolhida.mostrarRodapeContato);
+            const cliente = candidatos[i];
+            const indice = i + 1;
+            let resultado;
 
             try {
-                const isRegistered = await client.isRegisteredUser(cliente.telefoneValido);
-                
-                if (isRegistered) {
-                    await client.sendMessage(cliente.telefoneValido, texto);
-                    console.log(`✔ Enviado com sucesso para ${cliente.telefoneOriginal || cliente.telefoneValido}`);
-                    resultados.push({ ...cliente, statusEnvio: 'Enviado' });
-
-                    if (index < total) {
-                        const waitTime = randomWait();
-                        console.log(`Aguarde ${(waitTime / 1000).toFixed(1)} segundos...`);
-                        await sleep(waitTime);
-                    }
+                if (!cliente.telefoneValido) {
+                    resultado = { ...cliente, statusEnvio: 'Ignorado - Sem telefone valido' };
                 } else {
-                    console.log('❌ Erro - Número inexistente no WhatsApp.');
-                    resultados.push({ ...cliente, statusEnvio: 'Erro - Não tem WhatsApp' });
+                    const texto = resolveMessage(cliente, campanhaEscolhida);
+                    const isRegistered = await client.isRegisteredUser(cliente.telefoneValido);
+
+                    if (isRegistered) {
+                        await client.sendMessage(cliente.telefoneValido, texto);
+                        resultado = { ...cliente, statusEnvio: 'Enviado' };
+                    } else {
+                        resultado = { ...cliente, statusEnvio: 'Erro - Nao tem WhatsApp' };
+                    }
                 }
             } catch (error) {
-                console.log(`❌ Erro no envio: ${error.message}`);
-                resultados.push({ ...cliente, statusEnvio: `Erro de envio: ${error.message}` });
+                resultado = { ...cliente, statusEnvio: `Erro de envio: ${error.message}` };
             }
 
-            index++;
+            resultados.push(resultado);
+            options.onProgress?.({
+                indice,
+                total,
+                cliente: {
+                    id: cliente.id,
+                    nome: cliente.nome,
+                    telefone: normalizePhoneDigits(cliente.telefone),
+                },
+                statusEnvio: resultado.statusEnvio,
+                classe: classify(resultado.statusEnvio),
+            });
+
+            if (i < total - 1 && options.delay !== false) {
+                await sleep(randomWait(options.tempoMin, options.tempoMax));
+            }
         }
 
         return resultados;
-    }
+    },
 };

@@ -1,5 +1,5 @@
 {
-  "name": "valeverdebot",
+  "name": "whatsbot-vhub",
   "version": "1.0.0",
   "description": "Bot de Cobranca Vale Verde",
   "main": "electron-main.js",
@@ -9,10 +9,11 @@
     "dist": "electron-builder"
   },
   "dependencies": {
-    "exceljs": "^4.4.0",
+    "pdf-parse": "^1.1.1",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.26.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "electron": "^37.2.0",

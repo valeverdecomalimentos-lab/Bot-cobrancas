@@ -120,5 +120,6 @@ function openBrowser(url) {
 module.exports = {
     startServer,
     setQr,
-    openBrowser
+    openBrowser,
+    getUrl: () => `http://127.0.0.1:${port}/qr`,
 };

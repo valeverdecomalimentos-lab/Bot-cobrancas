@@ -26,7 +26,10 @@ export const Icone = {
   usuario: base('<circle cx="12" cy="8" r="3.3"/><path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5"/>'),
   chevronBaixo: base('<path d="M6 9l6 6 6-6"/>'),
   editar: base('<path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16v4Z"/>'),
+  adicionar: base('<circle cx="12" cy="12" r="9.5"/><path d="M12 8v8M8 12h8"/>'),
   lixeira: base('<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>'),
   menu: base('<path d="M4 7h16M4 12h16M4 17h16"/>'),
   sparkles: base('<path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/>'),
+  produtos: base('<path d="m12 3 8 4.4v9.2L12 21l-8-4.4V7.4L12 3Z"/><path d="m4 7.4 8 4.4 8-4.4M12 11.8V21"/>'),
+  atualizar: base('<path d="M20 11a8 8 0 0 0-14.9-4L3 10"/><path d="M3 4v6h6"/><path d="M4 13a8 8 0 0 0 14.9 4L21 14"/><path d="M21 20v-6h-6"/>'),
 };

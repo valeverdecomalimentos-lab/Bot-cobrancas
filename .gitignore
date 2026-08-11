@@ -16,3 +16,12 @@ thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.env
+env
+
+# Dados e artefatos locais da aplicacao
+data/
+uploads/
+dist/
+.wwebjs_auth/
+.wwebjs_cache/

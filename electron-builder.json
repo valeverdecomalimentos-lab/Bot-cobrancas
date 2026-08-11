@@ -1,14 +1,20 @@
 {
   "appId": "com.valeverde.dashboard",
-  "productName": "Vale Verde Dashboard",
+  "productName": "Vale Verde Dashboard - Void Hub",
   "directories": {
     "output": "dist"
   },
   "files": [
     "**/*",
-    "!node_modules/**",
     "!dist/**",
-    "!\.git/**"
+    "!.git/**",
+    "!.env",
+    "!data/**",
+    "!reports/**",
+    "!uploads/**",
+    "!logs/**",
+    "!.wwebjs_auth/**",
+    "!.wwebjs_cache/**"
   ],
   "win": {
     "target": [
@@ -17,7 +23,7 @@
         "arch": ["x64"]
       }
     ],
-    "icon": "build/icon.ico"
+    "icon": "logo.ico"
   },
   "nsis": {
     "oneClick": true,

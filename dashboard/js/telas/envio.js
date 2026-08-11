@@ -1,134 +1,115 @@
-import { estado, formatarTelefone, persistirEstado } from '../nucleo/estado.js';
+import { estado, formatarTelefone } from '../nucleo/estado.js';
+import { api } from '../nucleo/pontos-integracao.js';
 import { navegar } from '../nucleo/roteador.js';
-import { paraElemento, mostrarToast } from '../nucleo/ui.js';
+import { paraElemento, mostrarToast, escaparHtml } from '../nucleo/ui.js';
 import { Icone } from '../nucleo/icones.js';
 
-const RESULTADOS = [
-  { chave: 'enviado', peso: 0.9, rotulo: 'Enviado', icone: Icone.check, cor: 'var(--vv-sucesso)' },
-  { chave: 'erro', peso: 0.07, rotulo: 'Erro', icone: Icone.x, cor: 'var(--vv-erro)' },
-  { chave: 'ignorado', peso: 0.03, rotulo: 'Ignorado', icone: Icone.aviso, cor: 'var(--vv-neutro)' },
-];
-function sortearResultado() {
-  const r = Math.random();
-  let acc = 0;
-  for (const item of RESULTADOS) { acc += item.peso; if (r <= acc) return item; }
-  return RESULTADOS[0];
-}
-
-function salvarHistorico(campanha, total, enviados, erros, ignorados) {
-  estado.historico.unshift({
-    id: Date.now(),
-    data: new Date().toISOString(),
-    tipo: campanha.tipo,
-    total,
-    enviados,
-    erros,
-    ignorados,
-  });
-  estado.campanhaEmAndamento = null;
-  persistirEstado();
+function tipoDoResultado(status) {
+  if (/^Enviado/i.test(status)) return { nome: 'Enviado', tom: 'sucesso', icone: Icone.check };
+  if (/^Ignorado/i.test(status)) return { nome: 'Ignorado', tom: 'neutro', icone: Icone.aviso };
+  return { nome: 'Erro', tom: 'erro', icone: Icone.x };
 }
 
 export function montarEnvio(alvo) {
   const campanha = estado.campanhaEmAndamento;
   if (!campanha) {
-    alvo.appendChild(paraElemento(`<div class="estado-vazio">${Icone.campanha}<p>Nenhum envio em andamento. Inicie uma campanha primeiro.</p></div>`));
+    alvo.appendChild(paraElemento(`<div class="estado-vazio">${Icone.campanha}<p>Nenhuma campanha ativa.</p></div>`));
     return;
   }
 
-  const total = campanha.destinatarios.length;
-  let enviados = 0, comErro = 0, ignorados = 0;
-  let pausado = false, cancelado = false;
-  const raio = 62, circ = 2 * Math.PI * raio;
+  const total = Number(campanha.totalPlanejado || campanha.recipientIds?.length || 0);
+  const raio = 62;
+  const circunferencia = 2 * Math.PI * raio;
+  let enviados = 0;
+  let erros = 0;
+  let ignorados = 0;
+  let finalizado = false;
+  let pausado = false;
 
   const tela = paraElemento(`
     <div>
       <div class="topo-pagina">
-        <div><h1>Envio em andamento</h1><p class="legenda">${campanha.tipo === 'cobranca' ? 'Campanha de cobrança' : 'Campanha promocional'} · ${total} destinatários</p></div>
-        <div style="display:flex;gap:10px">
-          <button class="btn btn--secundario" id="btn-pausar">${Icone.pausa} Pausar</button>
-          <button class="btn btn--perigo" id="btn-cancelar">Cancelar</button>
-        </div>
+        <div><h1>Envio em andamento</h1><p class="legenda">${campanha.tipo === 'cobranca' ? 'Campanha de cobranca' : 'Campanha promocional'} · ${total} destinatarios planejados</p></div>
+        <div style="display:flex;gap:10px"><button class="btn btn--secundario" id="btn-pausar">${Icone.pausa} Pausar</button><button class="btn btn--perigo" id="btn-cancelar">Cancelar</button></div>
       </div>
-
       <div class="cartao" style="padding:26px;display:flex;gap:34px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
         <div class="anel-progresso">
-          <svg width="150" height="150" viewBox="0 0 150 150">
-            <circle cx="75" cy="75" r="${raio}" stroke="#E2DFD2" stroke-width="12" fill="none"/>
-            <circle id="circulo-progresso" cx="75" cy="75" r="${raio}" stroke="#3E6650" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="${circ}" stroke-dashoffset="${circ}"/>
-          </svg>
+          <svg width="150" height="150" viewBox="0 0 150 150"><circle cx="75" cy="75" r="${raio}" stroke="#D6E0D6" stroke-width="12" fill="none"/><circle id="circulo-progresso" cx="75" cy="75" r="${raio}" stroke="#3E6650" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="${circunferencia}" stroke-dashoffset="${circunferencia}"/></svg>
           <div class="texto"><strong id="txt-contagem">0/${total}</strong><span id="txt-percentual">0%</span></div>
         </div>
-        <div style="flex:1;min-width:200px;display:flex;gap:24px">
-          <div><div class="rotulo" style="font-size:12.5px;color:var(--vv-texto-sutil);font-weight:600">${Icone.check} Enviados</div><div class="valor" style="font-size:22px;font-family:var(--vv-fonte-titulo)" id="txt-enviados">0</div></div>
-          <div><div class="rotulo" style="font-size:12.5px;color:var(--vv-texto-sutil);font-weight:600">${Icone.x} Erros</div><div class="valor" style="font-size:22px;font-family:var(--vv-fonte-titulo)" id="txt-erros">0</div></div>
-          <div><div class="rotulo" style="font-size:12.5px;color:var(--vv-texto-sutil);font-weight:600">${Icone.aviso} Ignorados</div><div class="valor" style="font-size:22px;font-family:var(--vv-fonte-titulo)" id="txt-ignorados">0</div></div>
-        </div>
+        <div style="flex:1;min-width:200px;display:flex;gap:24px"><div><div class="rotulo">${Icone.check} Enviados</div><div class="valor" id="txt-enviados">0</div></div><div><div class="rotulo">${Icone.x} Erros</div><div class="valor" id="txt-erros">0</div></div><div><div class="rotulo">${Icone.aviso} Ignorados</div><div class="valor" id="txt-ignorados">0</div></div></div>
       </div>
-
-      <div class="cartao">
-        <div style="padding:14px 16px;border-bottom:1px solid var(--vv-linha);font-weight:600;font-size:14px">Log de envio</div>
-        <div class="log-envio" id="log-envio"></div>
-      </div>
+      <div class="cartao"><div style="padding:14px 16px;border-bottom:1px solid var(--vv-linha);font-weight:600;font-size:14px">Log de envio</div><div class="log-envio" id="log-envio"></div></div>
     </div>`);
   alvo.appendChild(tela);
-
-  const circulo = tela.querySelector('#circulo-progresso');
   const log = tela.querySelector('#log-envio');
-  const btnPausar = tela.querySelector('#btn-pausar');
+
+  function quantidadeProcessada() {
+    return enviados + erros + ignorados;
+  }
 
   function atualizarResumo() {
-    tela.querySelector('#txt-contagem').textContent = `${enviados + comErro + ignorados}/${total}`;
-    tela.querySelector('#txt-percentual').textContent = `${Math.round(((enviados + comErro + ignorados) / total) * 100)}%`;
+    const processados = quantidadeProcessada();
+    const percentual = total ? Math.round((processados / total) * 100) : 0;
+    tela.querySelector('#txt-contagem').textContent = `${processados}/${total}`;
+    tela.querySelector('#txt-percentual').textContent = `${percentual}%`;
     tela.querySelector('#txt-enviados').textContent = enviados;
-    tela.querySelector('#txt-erros').textContent = comErro;
+    tela.querySelector('#txt-erros').textContent = erros;
     tela.querySelector('#txt-ignorados').textContent = ignorados;
-    const progresso = (enviados + comErro + ignorados) / total;
-    circulo.setAttribute('stroke-dashoffset', String(circ * (1 - progresso)));
+    tela.querySelector('#circulo-progresso').setAttribute('stroke-dashoffset', String(circunferencia * (1 - (total ? processados / total : 0))));
   }
 
-  function processarProximo(indice) {
-    if (cancelado || indice >= total) {
-      if (!cancelado) finalizar();
-      return;
-    }
-    if (pausado) { setTimeout(() => processarProximo(indice), 400); return; }
-
-    const cliente = campanha.destinatarios[indice];
-    const resultado = sortearResultado();
-    if (resultado.chave === 'enviado') enviados++; else if (resultado.chave === 'erro') comErro++; else ignorados++;
-
-    const linha = paraElemento(`
-      <div class="linha-log">
-        <span style="color:${resultado.cor}">${resultado.icone}</span>
-        <span>${cliente.nome}</span>
-        <span class="badge badge--${resultado.chave === 'enviado' ? 'sucesso' : resultado.chave === 'erro' ? 'erro' : 'neutro'}">${resultado.rotulo}</span>
-        <span class="tel">${formatarTelefone(cliente.telefone)}</span>
-      </div>`);
-    log.appendChild(linha);
+  const removerProgresso = api.onCampaignProgress((progresso) => {
+    if (!tela.isConnected || finalizado) return;
+    const resultado = tipoDoResultado(progresso.statusEnvio || 'Erro');
+    if (resultado.tom === 'sucesso') enviados += 1;
+    else if (resultado.tom === 'neutro') ignorados += 1;
+    else erros += 1;
+    log.appendChild(paraElemento(`<div class="linha-log"><span>${resultado.icone}</span><span>${escaparHtml(progresso.cliente?.nome || 'Cliente')}</span><span class="badge badge--${resultado.tom}">${resultado.nome}</span><span class="tel">${formatarTelefone(progresso.cliente?.telefone)}</span></div>`));
     log.scrollTop = log.scrollHeight;
     atualizarResumo();
-
-    setTimeout(() => processarProximo(indice + 1), 90);
-  }
-
-  function finalizar() {
-    mostrarToast('Campanha concluída', 'sucesso');
-    salvarHistorico(campanha, total, enviados, comErro, ignorados);
-    setTimeout(() => navegar('historico'), 900);
-  }
-
-  btnPausar.addEventListener('click', () => {
-    pausado = !pausado;
-    btnPausar.innerHTML = pausado ? `${Icone.play} Retomar` : `${Icone.pausa} Pausar`;
   });
-  tela.querySelector('#btn-cancelar').addEventListener('click', () => {
-    if (!confirm('Cancelar o envio em andamento? O progresso até aqui será registrado no histórico.')) return;
-    cancelado = true;
-    mostrarToast('Envio cancelado pelo usuário', 'aviso');
-    salvarHistorico(campanha, total, enviados, comErro, total - enviados - comErro);
+
+  async function encerrar(resultado, erro) {
+    if (finalizado) return;
+    finalizado = true;
+    removerProgresso();
+    tela.querySelector('#btn-pausar').disabled = true;
+    tela.querySelector('#btn-cancelar').disabled = true;
+    if (erro) {
+      campanha.iniciada = false;
+      mostrarToast(erro.message || 'O envio nao foi concluido.', 'erro');
+      return;
+    }
+    estado.historico = await api.listReports();
+    estado.campanhaEmAndamento = null;
+    mostrarToast(resultado?.cancelado ? 'Campanha cancelada e relatorio salvo.' : 'Campanha concluida e relatorio salvo.', resultado?.cancelado ? 'aviso' : 'sucesso');
     setTimeout(() => navegar('historico'), 700);
+  }
+
+  tela.querySelector('#btn-pausar').addEventListener('click', async () => {
+    try {
+      pausado = !pausado;
+      await api.pauseCampaign(pausado);
+      tela.querySelector('#btn-pausar').innerHTML = pausado ? `${Icone.play} Retomar` : `${Icone.pausa} Pausar`;
+    } catch (error) {
+      pausado = !pausado;
+      mostrarToast(error.message || 'Nao foi possivel alterar a campanha.', 'erro');
+    }
+  });
+  tela.querySelector('#btn-cancelar').addEventListener('click', async () => {
+    if (!confirm('Cancelar o envio? Os resultados ja processados serao salvos em relatorio.')) return;
+    try {
+      await api.cancelCampaign();
+      tela.querySelector('#btn-cancelar').disabled = true;
+      tela.querySelector('#btn-cancelar').textContent = 'Cancelando...';
+    } catch (error) {
+      mostrarToast(error.message || 'Nao foi possivel cancelar a campanha.', 'erro');
+    }
   });
 
-  processarProximo(0);
+  if (!campanha.iniciada) {
+    campanha.iniciada = true;
+    api.startCampaign(campanha).then((resultado) => encerrar(resultado)).catch((error) => encerrar(null, error));
+  }
 }

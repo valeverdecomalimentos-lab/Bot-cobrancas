@@ -1,21 +1,34 @@
-// Mapa único de integração com o backend Node.js (core/*.js do bot).
-// Trocar `SIMULADO` por chamadas fetch()/WebSocket reais é a ÚNICA mudança
-// necessária para sair do protótipo e ir para produção — nenhuma tela
-// depende diretamente de rede, todas passam por este módulo.
+function indisponivel() {
+  return Promise.reject(new Error('Abra o painel pelo aplicativo Electron para acessar os recursos locais.'));
+}
 
-export const ENDPOINTS = {
-  statusWhatsapp: { metodo: 'GET', rota: '/api/whatsapp/status' },
-  wsQr: 'whatsapp:qr',
-  wsConectado: 'whatsapp:conectado',
-  importarClientes: { metodo: 'POST', rota: '/api/clientes/importar' },
-  listarClientes: { metodo: 'GET', rota: '/api/clientes' },
-  criarCampanha: { metodo: 'POST', rota: '/api/campanhas' },
-  wsProgresso: 'envio:progresso',
-  wsLog: 'envio:log',
-  listarRelatorios: { metodo: 'GET', rota: '/api/relatorios' },
-  detalheRelatorio: { metodo: 'GET', rota: '/api/relatorios/:id' },
-  // Opcional — geração assistida de mensagem via IA (Gemini). Ver README.
-  sugerirMensagemIA: { metodo: 'POST', rota: '/api/ia/sugerir-mensagem' },
+const bridge = typeof window !== 'undefined' ? window.valeverdeAPI : null;
+
+export const api = bridge || {
+  bootstrap: indisponivel,
+  syncLists: indisponivel,
+  importCustomers: indisponivel,
+  listCustomers: indisponivel,
+  listReports: indisponivel,
+  getReport: indisponivel,
+  showReportInFolder: indisponivel,
+  saveSettings: indisponivel,
+  listTemplates: indisponivel,
+  saveTemplate: indisponivel,
+  deleteTemplate: indisponivel,
+  importTemplate: indisponivel,
+  startWhatsapp: indisponivel,
+  getWhatsappStatus: indisponivel,
+  sendTest: indisponivel,
+  startCampaign: indisponivel,
+  pauseCampaign: indisponivel,
+  cancelCampaign: indisponivel,
+  getGeminiStatus: indisponivel,
+  generateExecutiveReport: indisponivel,
+  askGemini: indisponivel,
+  diagnoseGemini: indisponivel,
+  suggestCampaignMessage: indisponivel,
+  onWhatsappStatus: () => () => {},
+  onCampaignProgress: () => () => {},
+  onCampaignFinished: () => () => {},
 };
-
-export const SIMULADO = true; // false quando plugado ao backend real

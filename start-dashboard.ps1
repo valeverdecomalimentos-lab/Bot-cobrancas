@@ -1,48 +1,25 @@
 $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$port = 9000
-$url = "http://localhost:$port/"
+$compiledApp = Get-ChildItem (Join-Path $repoRoot 'dist\win-unpacked') -Filter '*.exe' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+$electronExe = Join-Path $repoRoot 'node_modules\electron\dist\electron.exe'
 
-function Test-HttpPort {
-    param([int]$Port)
-    try {
-        $request = [System.Net.WebRequest]::Create("http://127.0.0.1:$Port/")
-        $request.Timeout = 2000
-        $response = $request.GetResponse()
-        $response.Close()
-        return $true
-    } catch {
-        return $false
-    }
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+if (Test-Path (Join-Path $repoRoot '.env')) {
+    $env:VALEVERDE_ENV_PATH = Join-Path $repoRoot '.env'
+}
+if (Test-Path (Join-Path $repoRoot 'listas')) {
+    $env:VALEVERDE_LISTS_DIR = Join-Path $repoRoot 'listas'
 }
 
-$pythonCommand = $null
-foreach ($candidate in @('py', 'python', 'python3')) {
-    $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($cmd) {
-        $pythonCommand = $cmd
-        break
-    }
+if ($compiledApp) {
+    Start-Process -FilePath $compiledApp.FullName -WorkingDirectory $repoRoot
+    Write-Host 'Vale Verde Dashboard iniciado.'
+    exit 0
 }
 
-if (-not $pythonCommand) {
-    throw "Python não encontrado. Instale Python 3 e tente novamente."
+if (Test-Path $electronExe) {
+    Start-Process -FilePath $electronExe -ArgumentList '.' -WorkingDirectory $repoRoot
+    Write-Host 'Vale Verde Dashboard iniciado em modo de desenvolvimento.'
+    exit 0
 }
 
-$serverRunning = Test-HttpPort -Port $port
-if (-not $serverRunning) {
-    if ($pythonCommand.Name -eq 'py') {
-        Start-Process -FilePath $pythonCommand.Source -ArgumentList @('-3', '-m', 'http.server', $port) -WorkingDirectory $repoRoot -WindowStyle Hidden
-    } else {
-        Start-Process -FilePath $pythonCommand.Source -ArgumentList @('-m', 'http.server', $port) -WorkingDirectory $repoRoot -WindowStyle Hidden
-    }
-
-    for ($i = 0; $i -lt 20; $i++) {
-        Start-Sleep -Milliseconds 500
-        if (Test-HttpPort -Port $port) {
-            break
-        }
-    }
-}
-
-Start-Process $url
-Write-Host "Dashboard aberto em $url"
+throw 'Dependencias nao encontradas. Execute npm install antes de iniciar o painel.'
