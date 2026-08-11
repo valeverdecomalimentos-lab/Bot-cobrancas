@@ -1,25 +1,39 @@
-# Node modules
+# Dependencies
 node_modules/
 
-# Excel listas
+# Local lists and imports
 listas/
-*.xlsx
+*.csv
 *.xls
+*.xlsx
 
-# Relatórios
+# Local reports and logs
 reports/
+logs/
+*.log
+ultimop.txt
 
-# Cache comuns
+# Common caches and OS noise
 .cache/
 thumbs.db
 .DS_Store
+desktop.ini
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Local secrets and environment files
 .env
+.env.*
+*.local
+*.secret
+*.key
+*.pem
+*.p12
+*.pfx
 env
 
-# Dados e artefatos locais da aplicacao
+# Local app data and generated artifacts
 data/
 uploads/
 dist/
