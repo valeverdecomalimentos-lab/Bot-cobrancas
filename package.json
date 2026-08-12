@@ -34,6 +34,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=24"
+  },
   "bugs": {
     "url": "https://github.com/valeverdecomalimentos-lab/Bot-cobrancas/issues"
   },

@@ -39,6 +39,11 @@ env
 
 # Local app data and generated artifacts
 data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.fdb
+*.fbconsumer
 uploads/
 dist/
 .wwebjs_auth/

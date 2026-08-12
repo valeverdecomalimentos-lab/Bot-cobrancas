@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('valeverdeAPI', {
     bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
     syncLists: () => ipcRenderer.invoke('lists:sync'),
     importCustomers: () => ipcRenderer.invoke('customers:import'),
+    importConsumerBackup: () => ipcRenderer.invoke('consumer-backup:import-file'),
+    importConsumerBackupFromUrl: (url) => ipcRenderer.invoke('consumer-backup:import-url', { url }),
     listCustomers: () => ipcRenderer.invoke('customers:list'),
     listReports: () => ipcRenderer.invoke('reports:list'),
     getReport: (id) => ipcRenderer.invoke('reports:get', id),
@@ -36,6 +38,7 @@ contextBridge.exposeInMainWorld('valeverdeAPI', {
     suggestCampaignMessage: (input) => ipcRenderer.invoke('gemini:suggest-campaign', input),
     clearGeminiHistory: () => ipcRenderer.invoke('gemini:clear-history'),
     onWhatsappStatus: (listener) => subscribe('whatsapp:status', listener),
+    onConsumerBackupProgress: (listener) => subscribe('consumer-backup:progress', listener),
     onCampaignProgress: (listener) => subscribe('campaign:progress', listener),
     onCampaignFinished: (listener) => subscribe('campaign:finished', listener),
 });

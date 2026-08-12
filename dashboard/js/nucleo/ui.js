@@ -38,7 +38,7 @@ export function mostrarToast(texto, tipo = 'sucesso') {
   return remover;
 }
 
-export function abrirModal({ titulo, corpoHtml, rodapeHtml = '' }) {
+export function abrirModal({ titulo, corpoHtml, rodapeHtml = '', aoFechar = null }) {
   const focoAnterior = document.activeElement;
   const idTitulo = `modal-titulo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const overlay = paraElemento(`
@@ -63,6 +63,7 @@ export function abrirModal({ titulo, corpoHtml, rodapeHtml = '' }) {
     fechado = true;
     document.removeEventListener('keydown', aoPressionarTecla, true);
     overlay.remove();
+    if (typeof aoFechar === 'function') aoFechar();
     if (focoAnterior instanceof HTMLElement && focoAnterior.isConnected) focoAnterior.focus();
   };
 

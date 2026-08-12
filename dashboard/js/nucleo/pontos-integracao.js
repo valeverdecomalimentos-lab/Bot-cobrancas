@@ -8,6 +8,8 @@ export const api = bridge || {
   bootstrap: indisponivel,
   syncLists: indisponivel,
   importCustomers: indisponivel,
+  importConsumerBackup: indisponivel,
+  importConsumerBackupFromUrl: indisponivel,
   listCustomers: indisponivel,
   listReports: indisponivel,
   getReport: indisponivel,
@@ -34,6 +36,7 @@ export const api = bridge || {
   suggestCampaignMessage: indisponivel,
   clearGeminiHistory: indisponivel,
   onWhatsappStatus: () => () => {},
+  onConsumerBackupProgress: () => () => {},
   onCampaignProgress: () => () => {},
   onCampaignFinished: () => () => {},
 };
