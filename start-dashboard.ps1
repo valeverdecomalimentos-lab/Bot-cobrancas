@@ -3,19 +3,18 @@ $compiledApp = Get-ChildItem (Join-Path $repoRoot 'dist\win-unpacked') -Filter '
 $electronExe = Join-Path $repoRoot 'node_modules\electron\dist\electron.exe'
 
 Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
-if (Test-Path (Join-Path $repoRoot 'listas')) {
-    $env:VALEVERDE_LISTS_DIR = Join-Path $repoRoot 'listas'
+# Este atalho pertence ao repositorio: quando o Electron local existe, ele deve
+# abrir os arquivos-fonte atuais. O pacote em dist pode ser de uma compilacao
+# anterior e fica somente como alternativa para maquinas sem node_modules.
+if (Test-Path $electronExe) {
+    Start-Process -FilePath $electronExe -ArgumentList '.' -WorkingDirectory $repoRoot
+    Write-Host 'Vale Verde Dashboard iniciado em modo de desenvolvimento.'
+    exit 0
 }
 
 if ($compiledApp) {
     Start-Process -FilePath $compiledApp.FullName -WorkingDirectory $repoRoot
-    Write-Host 'Vale Verde Dashboard iniciado.'
-    exit 0
-}
-
-if (Test-Path $electronExe) {
-    Start-Process -FilePath $electronExe -ArgumentList '.' -WorkingDirectory $repoRoot
-    Write-Host 'Vale Verde Dashboard iniciado em modo de desenvolvimento.'
+    Write-Host 'Vale Verde Dashboard iniciado pelo pacote compilado.'
     exit 0
 }
 

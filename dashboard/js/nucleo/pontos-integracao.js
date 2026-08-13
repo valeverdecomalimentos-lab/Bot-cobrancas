@@ -6,10 +6,11 @@ const bridge = typeof window !== 'undefined' ? window.valeverdeAPI : null;
 
 export const api = bridge || {
   bootstrap: indisponivel,
-  syncLists: indisponivel,
-  importCustomers: indisponivel,
-  importConsumerBackup: indisponivel,
-  importConsumerBackupFromUrl: indisponivel,
+  importDataFile: indisponivel,
+  importDataFromUrl: indisponivel,
+  removeConsumerBackupFolder: indisponivel,
+  getConsumerBackupSyncStatus: indisponivel,
+  getConsumerCustomerProfile: indisponivel,
   listCustomers: indisponivel,
   listReports: indisponivel,
   getReport: indisponivel,
@@ -37,6 +38,8 @@ export const api = bridge || {
   clearGeminiHistory: indisponivel,
   onWhatsappStatus: () => () => {},
   onConsumerBackupProgress: () => () => {},
+  onConsumerBackupSyncStatus: () => () => {},
+  onConsumerBackupDataUpdated: () => () => {},
   onCampaignProgress: () => () => {},
   onCampaignFinished: () => () => {},
 };

@@ -24,12 +24,10 @@ function resolveFormatOptions(mostrarRodapeContato, pixSettings) {
     if (mostrarRodapeContato && typeof mostrarRodapeContato === 'object' && !Array.isArray(mostrarRodapeContato)) {
         const options = mostrarRodapeContato;
         return {
-            mostrarRodapeContato: options.mostrarRodapeContato !== false,
             pixSettings: options.pixSettings || options.pix || options,
         };
     }
     return {
-        mostrarRodapeContato: mostrarRodapeContato !== false,
         pixSettings,
     };
 }
@@ -78,7 +76,7 @@ function formatMessage(cliente, templateText, mostrarRodapeContato = true, pixSe
     const numero = cleanText(cliente.numero || cliente.telefoneOriginal || cliente.telefone || '');
     const valor = formatMoney(getDebtAmount(cliente)).replace(/^R\$\s?/, '');
 
-    let mensagem = replacePixPlaceholders(template, options.pixSettings)
+    const mensagem = replacePixPlaceholders(template, options.pixSettings)
         .replace(/\{\{nome\}\}/g, nome)
         .replace(/\{\{primeiro_nome\}\}/g, firstName(nome))
         .replace(/\[cliente\]/g, nome)
@@ -89,15 +87,10 @@ function formatMessage(cliente, templateText, mostrarRodapeContato = true, pixSe
         .replace(/\{\{cpf\}\}/g, cleanText(cliente.cpf || 'nao informado'))
         .replace(/\[0,00\]/g, valor);
 
-    const hasAutomaticNotice = /mensagem autom(a|a)tica/i.test(mensagem.normalize('NFD').replace(/[\u0300-\u036f]/g, ''));
-    if (!hasAutomaticNotice) {
-        mensagem = `Esta e uma mensagem automatica da Vale Verde. Se voce ja pagou ou regularizou, responda esta conversa com o comprovante ou com o ajuste necessario.\n\n${mensagem}`;
-    }
-
-    if (options.mostrarRodapeContato && !template.includes('{{numero}}') && !template.includes('{{telefone}}')) {
-        mensagem += `\n\nCliente: ${nome || 'nao informado'}\nNumero: ${numero || 'nao informado'}\nValor: R$ ${valor}`;
-    }
-
+    // O corpo enviado pertence ao usuario. O sistema somente resolve os
+    // placeholders presentes e nunca acrescenta aviso, cabecalho ou rodape.
+    // `mostrarRodapeContato` permanece na assinatura para compatibilidade com
+    // scripts antigos, mas nao altera mais a mensagem.
     return mensagem.trim();
 }
 

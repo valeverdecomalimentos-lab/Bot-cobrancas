@@ -144,7 +144,6 @@ test('dashboard e configuracao PIX carregam com dados isolados', async ({}, test
             VALEVERDE_REPORTS_DIR: sandbox.reports,
             VALEVERDE_TEMPLATES_DIR: sandbox.templates,
             VALEVERDE_AUTH_DIR: sandbox.auth,
-            VALEVERDE_LISTS_DIR: sandbox.lists,
         },
     });
 

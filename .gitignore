@@ -1,33 +1,37 @@
-# Dependencies
+# Dependencias
 node_modules/
 
-# Local lists and imports
-listas/
-*.csv
-*.xls
-*.xlsx
-
-# Local reports and logs
-reports/
-logs/
-*.log
-ultimop.txt
-
-# Common caches and OS noise
+# Builds, caches e saidas de teste
+dist/
+.artifacts/
 .cache/
-thumbs.db
-.DS_Store
-desktop.ini
+playwright-report/
+test-results/
+coverage/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.artifacts/
-playwright-report/
-test-results/
 
-# Local secrets and environment files
+# Dados locais do aplicativo
+data/
+reports/
+uploads/
+logs/
+listas/
+backups/
+imports/
+importacoes/
+ultimop.txt
+
+# Sessao/cache do WhatsApp e Chromium
+.wwebjs_auth/
+.wwebjs_cache/
+whatsapp-auth/
+
+# Segredos e configuracoes locais
 .env
 .env.*
+!.env.example
 ai-credentials.json
 *.local
 *.secret
@@ -37,14 +41,37 @@ ai-credentials.json
 *.pfx
 env
 
-# Local app data and generated artifacts
-data/
+# Bancos e backups sensiveis
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
 *.fdb
+*.gdb
+*.fb
 *.fbconsumer
-uploads/
-dist/
-.wwebjs_auth/
-.wwebjs_cache/
+*.fbk
+*.gbk
+*.bak
+*.backup
+*.bkp
+
+# Arquivos importados pelo usuario
+*.csv
+*.tsv
+*.xls
+*.xlsx
+*.xlsm
+*.ods
+*.pdf
+
+# Fixtures sinteticas de teste podem ser versionadas
+!tests/fixtures/**
+!tests/**/fixtures/**
+
+# Arquivos do sistema operacional/editor
+Thumbs.db
+thumbs.db
+.DS_Store
+desktop.ini
+*.swp
+*.swo

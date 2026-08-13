@@ -83,14 +83,34 @@ test('impede envio com placeholder PIX quando os dados estao invalidos', () => {
 });
 
 test('nao altera templates personalizados que nao usam placeholders PIX', () => {
+    const template = 'Pagamento combinado diretamente com o financeiro.';
     const texto = message.montarComTexto(
         cliente,
-        'Pagamento combinado diretamente com o financeiro.\n\n!! Mensagem automatica !!',
-        false,
+        template,
+        true,
         { nomeFavorecido: '', chave: '', tipo: 'aleatoria' },
     );
 
-    assert.match(texto, /Pagamento combinado diretamente com o financeiro/);
+    assert.equal(texto, template);
+});
+
+test('entrega exatamente o template esperado, substituindo somente placeholders', () => {
+    const template = [
+        'Olá! {{nome}}',
+        'Temos ofertas especiais preparadas para você aqui na Vale Verde. Venha nos visitar e confira as novidades em nossos setores para abastecer a sua casa com economia e qualidade. Esperamos a sua visita!',
+    ].join('\n');
+
+    assert.equal(
+        message.montarComTexto(
+            { ...cliente, nome: '*Excluído * Rogerinho ( pedreiro )' },
+            template,
+            true,
+        ),
+        [
+            'Olá! *Excluído * Rogerinho ( pedreiro )',
+            'Temos ofertas especiais preparadas para você aqui na Vale Verde. Venha nos visitar e confira as novidades em nossos setores para abastecer a sua casa com economia e qualidade. Esperamos a sua visita!',
+        ].join('\n'),
+    );
 });
 
 test('sender usa os dados PIX da campanha no texto realmente enviado', async () => {
@@ -116,7 +136,37 @@ test('sender usa os dados PIX da campanha no texto realmente enviado', async () 
     );
 
     assert.equal(resultados[0].statusEnvio, 'Enviado');
-    assert.match(enviados[0].texto, /PIX: financeiro@valeverde\.com\.br — Vale Verde Alimentos/);
+    assert.equal(enviados[0].texto, 'PIX: financeiro@valeverde.com.br — Vale Verde Alimentos');
+});
+
+test('teste, promocao e cobranca enviam somente a mensagem personalizada resolvida', async () => {
+    const enviados = [];
+    const client = {
+        isRegisteredUser: async () => true,
+        sendMessage: async (telefone, texto) => enviados.push({ telefone, texto }),
+    };
+    const template = 'Olá! {{nome}}\nOferta exclusiva para você.';
+
+    await sender.enviarTeste({
+        telefone: '22999999999',
+        mensagem: template,
+        clienteExemplo: cliente,
+    }, client);
+    for (const tipo of ['promocao', 'cobranca']) {
+        await sender.enviarMensagens([cliente], client, {
+            tipo,
+            mensagem: template,
+            // Mantem a antiga opcao ativa de proposito: ela nao pode mais
+            // acrescentar Cliente, Numero ou Valor fora do template.
+            mostrarRodapeContato: true,
+        }, { delay: false });
+    }
+
+    assert.deepEqual(enviados.map((envio) => envio.texto), [
+        'Olá! Maria da Silva\nOferta exclusiva para você.',
+        'Olá! Maria da Silva\nOferta exclusiva para você.',
+        'Olá! Maria da Silva\nOferta exclusiva para você.',
+    ]);
 });
 
 test('migra apenas o PIX fixo do template legado e preserva um backup', () => {

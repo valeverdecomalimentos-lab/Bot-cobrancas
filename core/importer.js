@@ -142,14 +142,35 @@ function rowsFromProductPdf(lines) {
 
 function inferListKind(filePath, rows = []) {
     const source = normalizeHeader(path.basename(String(filePath || '')));
-    if (/produto|estoque|catalogo/.test(source)) return 'produtos';
-    if (/fiado|devedor|divida|cobranca|debito/.test(source)) return 'devedores';
-    if (/cliente|contato/.test(source)) return 'clientes';
+    let sourceKind = null;
+    if (/produto|estoque|catalogo/.test(source)) sourceKind = 'produtos';
+    else if (/fiado|devedor|divida|cobranca|debito/.test(source)) sourceKind = 'devedores';
+    else if (/cliente|contato/.test(source)) sourceKind = 'clientes';
 
-    const headers = rows.slice(0, 3).flatMap((row) => Object.keys(row || {})).map(normalizeHeader).join(' ');
-    if (/(produto|categoria|preco|custo|estoque|codigopdv)/.test(headers)) return 'produtos';
-    if (/(saldo|devedor|divida|debito|limiteatingido)/.test(headers)) return 'devedores';
-    return 'clientes';
+    const headers = new Set(
+        rows.slice(0, 10)
+            .flatMap((row) => Object.keys(row || {}))
+            .map(normalizeHeader)
+            .filter((header) => header && !header.startsWith('__')),
+    );
+    if (!headers.size) return sourceKind;
+
+    const hasHeader = (expression) => [...headers].some((header) => expression.test(header));
+    const hasCustomerIdentity = hasHeader(/^(?:cliente|nomecliente|razaosocial|telefone.*|tel|fone.*|celular.*|whatsapp.*|contato.*|cpf.*|cnpj.*|documento.*|email.*|endereco.*|bairro|cep)$/);
+    const hasDebt = hasHeader(/^(?:saldo(?:devedor|atual)?|valor(?:devido|divida)|devedor|divida|debito|limiteatingido|fiado)$/);
+    const hasProductField = hasHeader(/^(?:produto|nomeproduto|descricaoproduto|categoria|estoque(?:atual|minimo)?|preco(?:venda|custo)?|custounitario|codigopdv|codigobarras|ean|unidade|medida)$/);
+    const hasProductCode = hasHeader(/^(?:codigo|cod|idproduto|referencia|sku)$/);
+    const hasProductValue = hasHeader(/^(?:venda|valorvenda|valorunitario|preco|precovenda|custo|precocusto)$/);
+    const hasProductEvidence = hasProductField || (hasProductCode && hasProductValue);
+
+    let rowKind = null;
+    if (hasProductEvidence && (hasCustomerIdentity || hasDebt)) rowKind = null;
+    else if (hasProductEvidence) rowKind = 'produtos';
+    else if (hasDebt) rowKind = 'devedores';
+    else if (hasCustomerIdentity) rowKind = 'clientes';
+
+    if (sourceKind && rowKind && sourceKind !== rowKind) return null;
+    return rowKind || sourceKind;
 }
 
 async function rowsFromPdf(filePath) {
@@ -190,8 +211,28 @@ async function readImportRows(filePath) {
     return { extension, rows, tipo: inferListKind(filePath, rows) };
 }
 
+function assertKnownListKind(kind) {
+    if (kind) return kind;
+    throw new Error(
+        'Nao foi possivel identificar com seguranca se o arquivo contem clientes, devedores ou produtos. '
+        + 'Use cabecalhos claros, como Telefone/CPF/Saldo para clientes ou Codigo/Produto/Preco/Venda/Estoque para produtos.',
+    );
+}
+
 async function parseImportFile(filePath) {
     const { extension, rows, tipo } = await readImportRows(filePath);
+    assertKnownListKind(tipo);
+    if (tipo === 'produtos') {
+        return {
+            arquivo: path.basename(filePath),
+            formato: extension.slice(1).toUpperCase(),
+            tipo,
+            rows,
+            clientes: [],
+            totalLido: rows.length,
+            invalidos: 0,
+        };
+    }
     const normalized = rows
         .map((row) => normalizeCustomer(row, { source: path.basename(filePath), keepRaw: true }))
         .filter(Boolean);
@@ -217,4 +258,5 @@ module.exports = {
     parseImportFile,
     readImportRows,
     inferListKind,
+    assertKnownListKind,
 };

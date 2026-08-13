@@ -16,14 +16,12 @@ module.exports = {
         '1': {
             nome: 'Cobrança',
             somenteDevedores: true,
-            template: 'cobranca.txt',
-            mostrarRodapeContato: true
+            template: 'cobranca.txt'
         },
         '2': {
             nome: 'Promoção',
             somenteDevedores: false,
-            template: 'promocao.txt',
-            mostrarRodapeContato: false
+            template: 'promocao.txt'
         }
     },
     ignorarSemTelefone: true

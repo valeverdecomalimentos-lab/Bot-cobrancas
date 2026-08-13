@@ -143,6 +143,7 @@ export const estado = {
   historico: [],
   importacoes: [],
   sincronizacao: null,
+  consumer: { resumo: null, importacoes: [], vinculacao: null, erro: '' },
   config: {
     pix: pixInicial,
     nomeFavorecido: pixInicial.nomeFavorecido,
@@ -164,6 +165,9 @@ export function aplicarBootstrap(dados = {}) {
   estado.historico = Array.isArray(dados.relatorios) ? dados.relatorios : [];
   estado.importacoes = Array.isArray(dados.importacoes) ? dados.importacoes : [];
   estado.sincronizacao = dados.sincronizacao || null;
+  estado.consumer = dados.consumer && typeof dados.consumer === 'object'
+    ? dados.consumer
+    : { resumo: null, importacoes: [], vinculacao: null, erro: '' };
   const configuracoes = dados.configuracoes && typeof dados.configuracoes === 'object' ? dados.configuracoes : {};
   const pix = normalizarConfigPix(configuracoes);
   estado.config = {

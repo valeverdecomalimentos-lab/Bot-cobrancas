@@ -1,6 +1,6 @@
-import { estado, aplicarBootstrap, formatarMoeda, formatarTelefone } from '../nucleo/estado.js';
+import { estado, formatarMoeda, formatarTelefone } from '../nucleo/estado.js';
 import { api } from '../nucleo/pontos-integracao.js';
-import { paraElemento, abrirModal, mostrarToast, escaparHtml } from '../nucleo/ui.js';
+import { paraElemento, abrirModal, escaparHtml } from '../nucleo/ui.js';
 import { Icone } from '../nucleo/icones.js';
 
 const ROTULO_STATUS = {
@@ -26,100 +26,385 @@ function numeroSeguro(valor) {
   return Number.isFinite(numero) ? numero : 0;
 }
 
-const ETAPAS_BACKUP = {
-  baixando: 'Baixando o backup do Google Drive…',
-  download: 'Baixando o backup do Google Drive…',
-  downloading: 'Baixando o backup do Google Drive…',
-  validando: 'Validando o arquivo de backup…',
-  validacao: 'Validando o arquivo de backup…',
-  validating: 'Validando o arquivo de backup…',
-  restaurando: 'Restaurando uma cópia temporária…',
-  restauracao: 'Restaurando uma cópia temporária…',
-  restoring: 'Restaurando uma cópia temporária…',
-  extraindo: 'Lendo clientes, pedidos e pagamentos…',
-  extracao: 'Lendo clientes, pedidos e pagamentos…',
-  extracting: 'Lendo clientes, pedidos e pagamentos…',
-  gravando: 'Atualizando a base analítica local…',
-  persistencia: 'Atualizando a base analítica local…',
-  persisting: 'Atualizando a base analítica local…',
-  'calculando-perfis': 'Calculando os perfis dos clientes…',
-  limpando: 'Removendo os arquivos temporários…',
-  concluido: 'Importação concluída.',
-  completed: 'Importação concluída.',
+function inteiroNaoNegativo(valor) {
+  return Math.max(0, Math.trunc(numeroSeguro(valor)));
+}
+
+function formatarCentavos(valor) {
+  return formatarMoeda(numeroSeguro(valor) / 100);
+}
+
+function formatarDataConsumer(valor) {
+  const instante = Date.parse(String(valor || ''));
+  if (!Number.isFinite(instante)) return 'Não informado';
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'America/Sao_Paulo',
+  }).format(instante).replace(',', ' às');
+}
+
+function formatarIntervaloDias(valor) {
+  if (valor === null || valor === undefined || valor === '') return 'Ainda não calculável';
+  const dias = numeroSeguro(valor);
+  const texto = dias.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+  return `${texto} ${Math.abs(dias) === 1 ? 'dia' : 'dias'}`;
+}
+
+function formatarQuantidadeMilli(valor) {
+  return (numeroSeguro(valor) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+}
+
+const ROTULO_CANAL_CONSUMER = {
+  delivery: 'Entrega',
+  pickup: 'Retirada',
+  inStore: 'Compra na loja',
+  other: 'Outro canal',
+  unknown: 'Desconhecido',
 };
 
-export function validarLinkBackupGoogleDrive(valor) {
-  const texto = String(valor || '').trim();
-  if (!texto) return { valido: false, erro: 'Cole o link compartilhado do arquivo de backup.' };
-  if (texto.length > 2048) return { valido: false, erro: 'O link informado é muito longo.' };
+function canaisConsumer(perfil) {
+  const preenchimento = perfil?.fulfillment && typeof perfil.fulfillment === 'object'
+    ? perfil.fulfillment
+    : {};
+  const explicitos = ['delivery', 'pickup', 'inStore', 'other'].map((chave) => ({
+    chave,
+    rotulo: ROTULO_CANAL_CONSUMER[chave],
+    quantidade: inteiroNaoNegativo(preenchimento[chave]),
+  }));
+  const totalExplicito = explicitos.reduce((total, canal) => total + canal.quantidade, 0);
+  const quantidadeDesconhecida = Object.hasOwn(preenchimento, 'unknown')
+    ? inteiroNaoNegativo(preenchimento.unknown)
+    : Math.max(0, inteiroNaoNegativo(perfil?.orderCount) - totalExplicito);
+  return [
+    ...explicitos,
+    { chave: 'unknown', rotulo: ROTULO_CANAL_CONSUMER.unknown, quantidade: quantidadeDesconhecida },
+  ];
+}
 
-  let url;
+function categoriasFavoritas(perfil) {
+  const categoriasInformadas = Array.isArray(perfil?.favoriteCategories)
+    ? perfil.favoriteCategories
+    : [];
+  if (categoriasInformadas.length) {
+    return categoriasInformadas
+      .filter((categoria) => categoria && typeof categoria === 'object')
+      .map((categoria) => ({
+        nome: String(categoria.category || categoria.name || 'Sem categoria').trim() || 'Sem categoria',
+        totalCents: numeroSeguro(categoria.totalCents),
+        quantityMilli: numeroSeguro(categoria.quantityMilli),
+      }))
+      .sort((a, b) => b.totalCents - a.totalCents || b.quantityMilli - a.quantityMilli)
+      .slice(0, 5);
+  }
+
+  const agregadas = new Map();
+  for (const produto of Array.isArray(perfil?.favoriteProducts) ? perfil.favoriteProducts : []) {
+    if (!produto || typeof produto !== 'object') continue;
+    const nome = String(produto.category || 'Sem categoria').trim() || 'Sem categoria';
+    const atual = agregadas.get(nome) || { nome, totalCents: 0, quantityMilli: 0 };
+    atual.totalCents += numeroSeguro(produto.totalCents);
+    atual.quantityMilli += numeroSeguro(produto.quantityMilli);
+    agregadas.set(nome, atual);
+  }
+  return [...agregadas.values()]
+    .sort((a, b) => b.totalCents - a.totalCents || b.quantityMilli - a.quantityMilli || a.nome.localeCompare(b.nome, 'pt-BR'))
+    .slice(0, 5);
+}
+
+function ordenarMaisRecentes(lista, campoData) {
+  return (Array.isArray(lista) ? lista : [])
+    .filter((item) => item && typeof item === 'object')
+    .slice()
+    .sort((a, b) => {
+      const dataA = Date.parse(String(a[campoData] || ''));
+      const dataB = Date.parse(String(b[campoData] || ''));
+      if (Number.isFinite(dataA) && Number.isFinite(dataB)) return dataB - dataA;
+      if (Number.isFinite(dataA)) return -1;
+      if (Number.isFinite(dataB)) return 1;
+      return 0;
+    });
+}
+
+function rotuloPagamentoCompra(compra) {
+  if (compra?.cancelled || compra?.paymentStatus === 'cancelled') return ['Compra cancelada', 'neutro'];
+  const status = String(compra?.paymentStatus || '').toLowerCase();
+  if (compra?.partialPayment || status === 'partial') return ['Pagamento parcial', 'alerta'];
+  if (status === 'paid') return ['Pago', 'sucesso'];
+  if (status === 'overpaid') return ['Pago acima do total', 'sucesso'];
+  return ['Sem pagamento registrado', 'erro'];
+}
+
+function rotuloMovimentacaoFiado(tipo) {
+  return ({
+    charge: 'Compra lançada no fiado',
+    payment: 'Pagamento do fiado',
+    adjustment: 'Ajuste de saldo',
+  })[String(tipo || '').toLowerCase()] || 'Movimentação do fiado';
+}
+
+function avisoHistoricoTruncado(meta) {
+  if (!meta?.truncated?.any) return '';
+  const rotulos = {
+    orders: 'compras',
+    payments: 'pagamentos',
+    ledger: 'movimentações do fiado',
+    items: 'itens de compras',
+    deliveries: 'entregas',
+  };
+  const partes = Object.entries(rotulos)
+    .filter(([chave]) => Boolean(meta.truncated[chave]))
+    .map(([, rotulo]) => rotulo);
+  const complemento = partes.length ? ` em ${partes.join(', ')}` : '';
+  return `<p class="perfil-consumer__historico-aviso" role="note"><strong>Visualização parcial.</strong> O limite de segurança foi atingido${escaparHtml(complemento)}. Os registros exibidos continuam ordenados do mais recente para o mais antigo.</p>`;
+}
+
+function renderizarItensCompra(compra) {
+  const itens = (Array.isArray(compra?.items) ? compra.items : [])
+    .filter((item) => item && typeof item === 'object');
+  if (!itens.length) {
+    return '<p class="perfil-consumer__vazio">Nenhum item detalhado foi encontrado nesta compra.</p>';
+  }
+  return `<ul class="perfil-consumer__itens" aria-label="Itens desta compra">${itens.map((item) => `
+    <li>
+      <div>
+        <strong>${escaparHtml(item.productName || 'Produto sem nome')}</strong>
+        <span>${escaparHtml(item.category || 'Sem categoria')}${item.cancelled ? ' · Item cancelado' : ''}</span>
+      </div>
+      <span>${formatarQuantidadeMilli(item.quantityMilli)} × ${formatarCentavos(item.unitPriceCents)}</span>
+      <strong>${formatarCentavos(item.totalCents)}</strong>
+    </li>`).join('')}</ul>`;
+}
+
+function renderizarHistoricoCompras(perfil, idBase) {
+  const compras = ordenarMaisRecentes(perfil?.ordersHistory, 'orderedAt');
+  if (!compras.length) return '<p class="perfil-consumer__vazio">Nenhuma compra detalhada foi encontrada.</p>';
+  return `<ol class="perfil-consumer__historico-lista" aria-label="Compras da mais recente para a mais antiga">${compras.map((compra, indice) => {
+    const [rotuloPagamento, tomPagamento] = rotuloPagamentoCompra(compra);
+    const dataValida = Number.isFinite(Date.parse(String(compra.orderedAt || '')))
+      ? String(compra.orderedAt)
+      : '';
+    return `<li>
+      <details class="perfil-consumer__compra" ${indice === 0 ? 'open' : ''}>
+        <summary>
+          <span>
+            <strong>Compra em <time${dataValida ? ` datetime="${escaparHtml(dataValida)}"` : ''}>${escaparHtml(formatarDataConsumer(compra.orderedAt))}</time></strong>
+            <span class="badge badge--${tomPagamento}">${rotuloPagamento}</span>
+          </span>
+          <strong>${formatarCentavos(compra.totalCents)}</strong>
+        </summary>
+        <dl class="perfil-consumer__compra-metricas">
+          <div><dt>Total da compra</dt><dd>${formatarCentavos(compra.totalCents)}</dd></div>
+          <div><dt>Pago registrado</dt><dd>${formatarCentavos(compra.recordedPaidTotalCents)}</dd></div>
+          <div><dt>Restante registrado</dt><dd>${formatarCentavos(compra.recordedRemainingCents)}</dd></div>
+          <div><dt>Origem</dt><dd>${escaparHtml(compra.origin || 'Não informada')}</dd></div>
+        </dl>
+        <div class="perfil-consumer__subtitulo"><strong>Produtos e quantidades</strong></div>
+        ${renderizarItensCompra(compra)}
+        ${compra?.historyTruncated && Object.values(compra.historyTruncated).some(Boolean)
+          ? '<p class="perfil-consumer__historico-aviso" role="note">Há mais detalhes nesta compra do que o limite exibido.</p>'
+          : ''}
+      </details>
+    </li>`;
+  }).join('')}</ol>`;
+}
+
+function renderizarHistoricoPagamentos(perfil) {
+  const pagamentos = ordenarMaisRecentes(perfil?.paymentsHistory, 'paidAt');
+  if (!pagamentos.length) return '<p class="perfil-consumer__vazio">Nenhum pagamento detalhado foi encontrado.</p>';
+  return `<ol class="perfil-consumer__movimentacoes" aria-label="Pagamentos do mais recente para o mais antigo">${pagamentos.map((pagamento) => `
+    <li>
+      <div>
+        <strong>${escaparHtml(formatarDataConsumer(pagamento.paidAt))}</strong>
+        <span>${escaparHtml(pagamento.method || 'Forma não informada')} · ${pagamento.orderExternalId ? 'Vinculado a uma compra' : 'Sem pedido vinculado'}${pagamento.cancelled ? ' · Cancelado' : ''}</span>
+      </div>
+      <strong>${formatarCentavos(pagamento.amountCents)}</strong>
+    </li>`).join('')}</ol>`;
+}
+
+function renderizarHistoricoFiado(perfil) {
+  const movimentacoes = ordenarMaisRecentes(perfil?.ledgerHistory, 'occurredAt');
+  if (!movimentacoes.length) return '<p class="perfil-consumer__vazio">Nenhuma movimentação do fiado foi encontrada.</p>';
+  return `<ol class="perfil-consumer__movimentacoes" aria-label="Movimentações do fiado da mais recente para a mais antiga">${movimentacoes.map((movimentacao) => `
+    <li>
+      <div>
+        <strong>${escaparHtml(rotuloMovimentacaoFiado(movimentacao.kind))}</strong>
+        <span>${escaparHtml(formatarDataConsumer(movimentacao.occurredAt))}${movimentacao.description ? ` · ${escaparHtml(movimentacao.description)}` : ''}${movimentacao.cancelled ? ' · Cancelada' : ''}</span>
+        ${movimentacao.balanceCents === null || movimentacao.balanceCents === undefined ? '' : `<small>Saldo após a movimentação: ${formatarCentavos(movimentacao.balanceCents)}</small>`}
+      </div>
+      <strong>${formatarCentavos(movimentacao.amountCents)}</strong>
+    </li>`).join('')}</ol>`;
+}
+
+function renderizarHistoricoCompleto(perfil, idBase) {
+  return `
+    ${avisoHistoricoTruncado(perfil?.historyMeta)}
+    <section class="perfil-consumer__historico-secao" aria-labelledby="${idBase}-historico-compras">
+      <div class="perfil-consumer__titulo-secao"><div><h6 id="${idBase}-historico-compras">Histórico de compras</h6><p>Da compra mais recente para a mais antiga, com produtos e valores registrados.</p></div></div>
+      ${renderizarHistoricoCompras(perfil, idBase)}
+    </section>
+    <div class="perfil-consumer__duas-colunas perfil-consumer__historico-colunas">
+      <section class="perfil-consumer__historico-secao" aria-labelledby="${idBase}-historico-pagamentos">
+        <div class="perfil-consumer__titulo-secao"><div><h6 id="${idBase}-historico-pagamentos">Histórico de pagamentos</h6><p>Inclui pagamentos sem pedido vinculado.</p></div></div>
+        ${renderizarHistoricoPagamentos(perfil)}
+      </section>
+      <section class="perfil-consumer__historico-secao" aria-labelledby="${idBase}-historico-fiado">
+        <div class="perfil-consumer__titulo-secao"><div><h6 id="${idBase}-historico-fiado">Movimentações do fiado</h6><p>Lançamentos, pagamentos e ajustes de saldo.</p></div></div>
+        ${renderizarHistoricoFiado(perfil)}
+      </section>
+    </div>`;
+}
+
+async function carregarHistoricoCompleto(cliente, container, idBase) {
   try {
-    url = new URL(texto);
+    const sourceKey = String(cliente?.consumerSourceKey || cliente?.vinculoConsumer?.sourceKey || '').trim();
+    const externalId = String(cliente?.consumerExternalId || cliente?.vinculoConsumer?.externalId || '').trim();
+    if (!sourceKey || !externalId) throw new Error('Vínculo Consumer indisponível.');
+    const resultado = await api.getConsumerCustomerProfile(sourceKey, externalId);
+    const perfil = resultado?.perfil && typeof resultado.perfil === 'object' ? resultado.perfil : resultado;
+    if (!perfil || typeof perfil !== 'object') throw new Error('Perfil detalhado não encontrado.');
+    if (!container.isConnected) return;
+    container.removeAttribute('role');
+    container.innerHTML = renderizarHistoricoCompleto(perfil, idBase);
   } catch {
-    return { valido: false, erro: 'Informe um link válido do Google Drive.' };
+    if (!container.isConnected) return;
+    container.setAttribute('role', 'alert');
+    container.innerHTML = '<div class="perfil-consumer__historico-erro"><strong>Não foi possível carregar o histórico completo.</strong><span>O resumo acima continua disponível. Tente abrir o perfil novamente.</span></div>';
   }
-
-  const host = url.hostname.toLowerCase().replace(/^www\./, '');
-  if (url.protocol !== 'https:' || !['drive.google.com', 'docs.google.com'].includes(host)) {
-    return { valido: false, erro: 'Use um link HTTPS compartilhado pelo Google Drive.' };
-  }
-  if (/\/folders\//i.test(url.pathname)) {
-    return { valido: false, erro: 'Esse é o link de uma pasta. Abra o backup e copie o link do arquivo .fbconsumer.' };
-  }
-
-  const idNoCaminho = url.pathname.match(/\/file\/d\/([^/]+)/i)?.[1];
-  const idNaConsulta = url.searchParams.get('id');
-  if (!idNoCaminho && !idNaConsulta) {
-    return { valido: false, erro: 'Não foi possível identificar o arquivo nesse link do Google Drive.' };
-  }
-  return { valido: true, url: url.toString(), erro: '' };
 }
 
-function valorNoCaminho(origem, caminho) {
-  return caminho.split('.').reduce((valor, chave) => valor?.[chave], origem);
-}
+function abrirModalPerfilConsumer(cliente) {
+  const perfil = cliente?.perfilConsumer;
+  if (!perfil || typeof perfil !== 'object') return;
 
-function contagemDoValor(valor) {
-  if (Array.isArray(valor)) return valor.length;
-  if (valor && typeof valor === 'object') {
-    for (const chave of ['total', 'quantidade', 'importados', 'count']) {
-      if (Object.hasOwn(valor, chave)) return contagemDoValor(valor[chave]);
-    }
-    return null;
-  }
-  if (valor === null || valor === undefined || valor === '') return null;
-  const numero = Number(valor);
-  return Number.isFinite(numero) ? Math.max(0, numero) : null;
-}
+  const nomeCliente = String(cliente.nome || perfil.name || 'Cliente').trim() || 'Cliente';
+  const produtos = (Array.isArray(perfil.favoriteProducts) ? perfil.favoriteProducts : [])
+    .filter((produto) => produto && typeof produto === 'object')
+    .slice(0, 5);
+  const categorias = categoriasFavoritas(perfil);
+  const canais = canaisConsumer(perfil);
+  const formaPreferida = Array.isArray(perfil.paymentMethods)
+    ? String(perfil.paymentMethods.find((forma) => forma?.method)?.method || '').trim()
+    : '';
+  const formasPagamento = (Array.isArray(perfil.paymentMethods) ? perfil.paymentMethods : [])
+    .filter((forma) => forma && typeof forma === 'object')
+    .slice(0, 5);
+  const canalPreferido = ROTULO_CANAL_CONSUMER[perfil.preferredFulfillment] || 'Não identificado';
+  const telefoneCliente = formatarTelefone(cliente.telefone || cliente.telefoneOriginal || '');
+  const idBase = `perfil-consumer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-function primeiraContagem(resultado, caminhos) {
-  for (const caminho of caminhos) {
-    const contagem = contagemDoValor(valorNoCaminho(resultado, caminho));
-    if (contagem !== null) return contagem;
-  }
-  return null;
-}
+  const { elemento, fechar } = abrirModal({
+    titulo: 'Perfil de compras',
+    corpoHtml: `
+      <article class="perfil-consumer">
+        <header class="perfil-consumer__intro">
+          <span class="perfil-consumer__icone" aria-hidden="true">${Icone.clientes}</span>
+          <div>
+            <span class="perfil-consumer__origem">Histórico do Consumer</span>
+            <h4>${escaparHtml(nomeCliente)}</h4>
+            <p>${telefoneCliente ? `Telefone: ${escaparHtml(telefoneCliente)} · ` : ''}Indicadores calculados a partir das compras e dos pagamentos importados.</p>
+          </div>
+        </header>
 
-function nomeArquivoSeguro(valor) {
-  return String(valor || '').split(/[\\/]/).pop().trim();
-}
+        <section class="perfil-consumer__bloco" aria-labelledby="${idBase}-compras">
+          <div class="perfil-consumer__titulo-secao">
+            <h5 id="${idBase}-compras">Compras e frequência</h5>
+          </div>
+          <dl class="perfil-consumer__metricas">
+            <div><dt>Compras</dt><dd>${inteiroNaoNegativo(perfil.orderCount).toLocaleString('pt-BR')}</dd></div>
+            <div><dt>Gasto total</dt><dd>${formatarCentavos(perfil.totalPurchasedCents)}</dd></div>
+            <div><dt>Ticket médio</dt><dd>${formatarCentavos(perfil.averageTicketCents)}</dd></div>
+            <div><dt>Média entre compras</dt><dd>${escaparHtml(formatarIntervaloDias(perfil.averageDaysBetweenPurchases))}</dd></div>
+            <div><dt>Produtos distintos</dt><dd>${inteiroNaoNegativo(perfil.distinctProducts).toLocaleString('pt-BR')}</dd></div>
+            <div><dt>Categorias distintas</dt><dd>${inteiroNaoNegativo(perfil.distinctCategories).toLocaleString('pt-BR')}</dd></div>
+            <div><dt>Primeira compra</dt><dd>${escaparHtml(formatarDataConsumer(perfil.firstPurchaseAt))}</dd></div>
+            <div><dt>Última compra</dt><dd>${escaparHtml(formatarDataConsumer(perfil.lastPurchaseAt))}</dd></div>
+          </dl>
+        </section>
 
-function mensagemDeErro(error, fallback) {
-  return String(error?.message || error || fallback)
-    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
-    .replace(/^Error:\s*/i, '')
-    .trim() || fallback;
+        <section class="perfil-consumer__bloco" aria-labelledby="${idBase}-pagamentos">
+          <div class="perfil-consumer__titulo-secao">
+            <h5 id="${idBase}-pagamentos">Pagamentos e saldo</h5>
+            <span class="badge ${numeroSeguro(perfil.currentDebtCents) > 0 ? 'badge--alerta' : 'badge--sucesso'}">${numeroSeguro(perfil.currentDebtCents) > 0 ? 'Com saldo aberto' : 'Sem saldo aberto'}</span>
+          </div>
+          <dl class="perfil-consumer__metricas perfil-consumer__metricas--pagamentos">
+            <div><dt>Pagamentos</dt><dd>${inteiroNaoNegativo(perfil.paymentCount).toLocaleString('pt-BR')}</dd></div>
+            <div><dt>Compras com pagamento parcial</dt><dd>${inteiroNaoNegativo(perfil.partialPaymentOrderCount).toLocaleString('pt-BR')}</dd></div>
+            <div><dt>Total pago</dt><dd>${formatarCentavos(perfil.paidTotalCents)}</dd></div>
+            <div><dt>Saldo em aberto</dt><dd class="${numeroSeguro(perfil.currentDebtCents) > 0 ? 'perfil-consumer__valor-alerta' : ''}">${formatarCentavos(perfil.currentDebtCents)}</dd></div>
+            <div><dt>Forma preferida</dt><dd>${escaparHtml(formaPreferida || 'Não informada')}</dd></div>
+            <div><dt>Último pagamento</dt><dd>${escaparHtml(formatarDataConsumer(perfil.lastPaymentAt))}</dd></div>
+            <div><dt>Último pagamento parcial</dt><dd>${escaparHtml(formatarDataConsumer(perfil.lastPartialPaymentAt))}</dd></div>
+            <div><dt>Média entre pagamentos</dt><dd>${escaparHtml(formatarIntervaloDias(perfil.averageDaysBetweenPayments))}</dd></div>
+            <div><dt>Pagamentos do fiado</dt><dd>${inteiroNaoNegativo(perfil.debtPaymentCount).toLocaleString('pt-BR')}</dd></div>
+            <div><dt>Total pago no fiado</dt><dd>${formatarCentavos(perfil.debtPaidTotalCents)}</dd></div>
+            <div><dt>Último pagamento do fiado</dt><dd>${escaparHtml(formatarDataConsumer(perfil.lastDebtPaymentAt))}</dd></div>
+            <div><dt>Média entre pagamentos do fiado</dt><dd>${escaparHtml(formatarIntervaloDias(perfil.averageDaysBetweenDebtPayments))}</dd></div>
+          </dl>
+          ${formasPagamento.length ? `<ol class="perfil-consumer__ranking perfil-consumer__ranking--pagamentos" aria-label="Formas de pagamento mais usadas">${formasPagamento.map((forma, indice) => `
+            <li><span class="perfil-consumer__posicao" aria-hidden="true">${indice + 1}</span><div><strong>${escaparHtml(forma.method || 'Não informada')}</strong><span>${inteiroNaoNegativo(forma.count).toLocaleString('pt-BR')} pagamento(s)</span></div><small>${formatarCentavos(forma.totalCents)}</small></li>
+          `).join('')}</ol>` : ''}
+        </section>
+
+        <div class="perfil-consumer__duas-colunas">
+          <section class="perfil-consumer__bloco" aria-labelledby="${idBase}-produtos">
+            <div class="perfil-consumer__titulo-secao"><h5 id="${idBase}-produtos">Produtos favoritos</h5></div>
+            ${produtos.length ? `<ol class="perfil-consumer__ranking">${produtos.map((produto, indice) => `
+              <li>
+                <span class="perfil-consumer__posicao" aria-hidden="true">${indice + 1}</span>
+                <div><strong>${escaparHtml(produto.name || 'Produto sem nome')}</strong><span>${escaparHtml(produto.category || 'Sem categoria')}</span></div>
+                <small>${formatarQuantidadeMilli(produto.quantityMilli)} em quantidade · ${formatarCentavos(produto.totalCents)}</small>
+              </li>`).join('')}</ol>` : '<p class="perfil-consumer__vazio">Nenhum produto identificado nas compras.</p>'}
+          </section>
+
+          <section class="perfil-consumer__bloco" aria-labelledby="${idBase}-categorias">
+            <div class="perfil-consumer__titulo-secao"><h5 id="${idBase}-categorias">Categorias favoritas</h5></div>
+            ${categorias.length ? `<ol class="perfil-consumer__ranking">${categorias.map((categoria, indice) => `
+              <li>
+                <span class="perfil-consumer__posicao" aria-hidden="true">${indice + 1}</span>
+                <div><strong>${escaparHtml(categoria.nome)}</strong><span>${formatarQuantidadeMilli(categoria.quantityMilli)} em quantidade</span></div>
+                <small>${formatarCentavos(categoria.totalCents)}</small>
+              </li>`).join('')}</ol>` : '<p class="perfil-consumer__vazio">Nenhuma categoria identificada nas compras.</p>'}
+          </section>
+        </div>
+
+        <section class="perfil-consumer__bloco" aria-labelledby="${idBase}-canais">
+          <div class="perfil-consumer__titulo-secao">
+            <div><h5 id="${idBase}-canais">Canais de compra</h5><p>Compras sem origem explícita permanecem separadas como desconhecidas.</p></div>
+            <span class="badge badge--neutro">Mais frequente entre identificados: ${escaparHtml(canalPreferido)}</span>
+          </div>
+          <ul class="perfil-consumer__canais">${canais.map((canal) => `
+            <li class="${canal.chave === 'unknown' ? 'perfil-consumer__canal--desconhecido' : ''}">
+              <span>${escaparHtml(canal.rotulo)}</span><strong>${canal.quantidade.toLocaleString('pt-BR')}</strong>
+            </li>`).join('')}</ul>
+        </section>
+
+        <section class="perfil-consumer__bloco perfil-consumer__historico" aria-labelledby="${idBase}-historico">
+          <div class="perfil-consumer__titulo-secao">
+            <div><h5 id="${idBase}-historico">Histórico completo</h5><p>Compras, produtos, pagamentos e movimentações são carregados somente ao abrir este perfil.</p></div>
+          </div>
+          <div class="perfil-consumer__historico-carregando" data-perfil-consumer-detalhes role="status" aria-live="polite">
+            <span aria-hidden="true"></span>
+            <strong>Carregando histórico completo…</strong>
+          </div>
+        </section>
+      </article>`,
+    rodapeHtml: '<button class="btn btn--primario" type="button" data-fechar-perfil>Fechar</button>',
+  });
+  elemento.querySelector('.modal')?.classList.add('modal--perfil-consumer');
+  elemento.querySelector('[data-fechar-perfil]').addEventListener('click', fechar);
+  const detalhes = elemento.querySelector('[data-perfil-consumer-detalhes]');
+  if (detalhes) carregarHistoricoCompleto(cliente, detalhes, idBase);
 }
 
 export function montarClientes(alvo) {
   let filtroStatus = 'todos';
   let termoBusca = '';
+  let clientesRenderizados = [];
   const tela = paraElemento(`
     <div>
       <div class="topo-pagina">
         <div><h1>Clientes</h1><p class="legenda" id="legenda-clientes"></p></div>
-        <button class="btn btn--primario" id="btn-importar" type="button">${Icone.upload} Importar dados</button>
       </div>
       <div class="barra-ferramentas">
         <div class="grupo-filtros" id="grupo-filtros" role="group" aria-label="Filtrar clientes por status">
@@ -151,6 +436,7 @@ export function montarClientes(alvo) {
       const texto = [cliente.nome, cliente.cpf, cliente.telefone].join(' ').toLowerCase();
       return passaStatus && (!busca || texto.includes(busca));
     });
+    clientesRenderizados = filtrados;
     legenda.textContent = `${clientes.length} clientes persistidos na base local`;
     if (!filtrados.length) {
       const mensagem = clientes.length
@@ -159,16 +445,17 @@ export function montarClientes(alvo) {
       corpoTabela.innerHTML = `<tr><td colspan="5"><div class="estado-vazio" role="status">${Icone.clientes}<p>${mensagem}</p></div></td></tr>`;
       return;
     }
-    corpoTabela.innerHTML = filtrados.map((cliente) => {
+    corpoTabela.innerHTML = filtrados.map((cliente, indice) => {
       const [rotulo, tom] = ROTULO_STATUS[cliente.status] || ['Sem status', 'neutro'];
       const perfil = cliente.perfilAnalitico || null;
       const [rotuloPerfil, tomPerfil] = perfil ? (ROTULO_PERFIL[perfil.nivel] || [perfil.rotulo, 'neutro']) : ['Perfil indisponível', 'neutro'];
+      const possuiPerfilConsumer = cliente.perfilConsumer && typeof cliente.perfilConsumer === 'object';
       return `<tr>
         <td class="celula-nome">${escaparHtml(cliente.nome || 'Sem nome')}</td>
         <td>${escaparHtml(formatarTelefone(cliente.telefone))}</td>
         <td class="celula-valor">${formatarMoeda(valorDevido(cliente))}</td>
         <td><span class="badge badge--${tom}">${rotulo}</span></td>
-        <td><span class="badge badge--${tomPerfil}" title="${escaparHtml(perfil?.motivo || '')}">${escaparHtml(rotuloPerfil)}</span></td>
+        <td><div class="celula-perfil"><span class="badge badge--${tomPerfil}" title="${escaparHtml(perfil?.motivo || '')}">${escaparHtml(rotuloPerfil)}</span>${possuiPerfilConsumer ? `<button class="botao-perfil-consumer" type="button" data-perfil-consumer="${indice}" aria-label="Ver perfil de compras de ${escaparHtml(cliente.nome || 'cliente')}">Ver perfil</button>` : ''}</div></td>
       </tr>`;
     }).join('');
   }
@@ -190,263 +477,10 @@ export function montarClientes(alvo) {
     termoBusca = event.target.value;
     renderizarLinhas();
   });
-  tela.querySelector('#btn-importar').addEventListener('click', () => abrirModalImportacao(renderizarLinhas));
-}
-
-function abrirModalImportacao(aoConcluir) {
-  let cancelarProgresso = () => {};
-  const { elemento, fechar } = abrirModal({
-    titulo: 'Importar dados de clientes',
-    corpoHtml: `
-      <div class="importacao-fontes" id="fontes-importacao">
-        <section class="importacao-fonte importacao-fonte--destaque" aria-labelledby="titulo-fonte-backup">
-          <div class="importacao-fonte__cabecalho">
-            <span class="importacao-fonte__icone" aria-hidden="true">${Icone.atualizar}</span>
-            <div>
-              <span class="badge badge--sucesso">Histórico completo</span>
-              <h4 id="titulo-fonte-backup">Backup do Consumer</h4>
-              <p>Importa clientes, compras, itens, pagamentos e entregas disponíveis no arquivo <strong>.fbconsumer</strong>.</p>
-            </div>
-          </div>
-          <button class="btn btn--primario importacao-fonte__acao" type="button" data-backup-local>${Icone.upload} Selecionar backup .fbconsumer</button>
-          <div class="importacao-separador" aria-hidden="true"><span>ou</span></div>
-          <form id="form-backup-drive" novalidate>
-            <label for="campo-link-backup">Link do arquivo no Google Drive</label>
-            <div class="importacao-link-linha">
-              <input id="campo-link-backup" name="backupUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://drive.google.com/file/d/…/view" aria-describedby="ajuda-link-backup erro-link-backup">
-              <button class="btn btn--secundario" type="submit" data-backup-link>Importar link</button>
-            </div>
-            <p class="ajuda-campo" id="ajuda-link-backup">Cole o link compartilhado do arquivo, não o link da pasta. O acesso precisa permitir a leitura do backup.</p>
-            <p class="erro-campo" id="erro-link-backup" role="alert" hidden></p>
-          </form>
-        </section>
-
-        <section class="importacao-fonte" aria-labelledby="titulo-fonte-tabela">
-          <div class="importacao-fonte__cabecalho">
-            <span class="importacao-fonte__icone" aria-hidden="true">${Icone.clientes}</span>
-            <div>
-              <span class="badge badge--neutro">Cadastro e saldos</span>
-              <h4 id="titulo-fonte-tabela">Tabela de clientes</h4>
-              <p>Continua aceitando XLS, XLSX, CSV e PDF textual para atualizar a lista atual.</p>
-            </div>
-          </div>
-          <button class="btn btn--secundario importacao-fonte__acao" type="button" data-tabela>${Icone.upload} Selecionar tabela</button>
-        </section>
-      </div>
-      <div class="importacao-andamento" id="andamento-importacao" aria-live="polite" aria-atomic="true" hidden>
-        <div class="importacao-andamento__texto"><strong id="texto-andamento">Preparando importação…</strong><span id="percentual-andamento"></span></div>
-        <div class="importacao-barra" id="barra-importacao" role="progressbar" aria-label="Progresso da importação"><i></i></div>
-        <p>Não feche o aplicativo enquanto os dados estão sendo processados.</p>
-      </div>
-      <div id="resultado-importacao" class="resultado-importacao" role="status" aria-live="polite" aria-atomic="true"></div>`,
-    rodapeHtml: '<button class="btn btn--secundario" type="button" data-fechar-importacao>Fechar</button>',
-    aoFechar: () => cancelarProgresso(),
+  corpoTabela.addEventListener('click', (event) => {
+    const botao = event.target instanceof Element ? event.target.closest('[data-perfil-consumer]') : null;
+    if (!botao) return;
+    const cliente = clientesRenderizados[Number(botao.dataset.perfilConsumer)];
+    if (cliente?.perfilConsumer) abrirModalPerfilConsumer(cliente);
   });
-  const fontes = elemento.querySelector('#fontes-importacao');
-  const botaoBackupLocal = elemento.querySelector('[data-backup-local]');
-  const botaoBackupLink = elemento.querySelector('[data-backup-link]');
-  const botaoTabela = elemento.querySelector('[data-tabela]');
-  const formularioLink = elemento.querySelector('#form-backup-drive');
-  const campoLink = elemento.querySelector('#campo-link-backup');
-  const erroLink = elemento.querySelector('#erro-link-backup');
-  const areaAndamento = elemento.querySelector('#andamento-importacao');
-  const textoAndamento = elemento.querySelector('#texto-andamento');
-  const percentualAndamento = elemento.querySelector('#percentual-andamento');
-  const barraAndamento = elemento.querySelector('#barra-importacao');
-  const areaResultado = elemento.querySelector('#resultado-importacao');
-  const controles = [botaoBackupLocal, botaoBackupLink, botaoTabela, campoLink];
-  let ocupado = false;
-  let tipoEmAndamento = '';
-  let botaoEmAndamento = null;
-  let conteudoOriginalBotao = '';
-
-  elemento.querySelector('[data-fechar-importacao]').addEventListener('click', fechar);
-
-  function limparErroLink() {
-    erroLink.hidden = true;
-    erroLink.textContent = '';
-    campoLink.removeAttribute('aria-invalid');
-  }
-
-  function mostrarErroLink(mensagem) {
-    erroLink.textContent = mensagem;
-    erroLink.hidden = false;
-    campoLink.setAttribute('aria-invalid', 'true');
-    campoLink.focus();
-  }
-
-  function atualizarProgresso(progresso = {}) {
-    if (!ocupado || tipoEmAndamento !== 'backup') return;
-    areaAndamento.hidden = false;
-    const etapa = String(progresso.etapa || progresso.stage || progresso.status || '').toLowerCase();
-    const mensagem = String(progresso.mensagem || progresso.message || ETAPAS_BACKUP[etapa] || 'Processando o backup…');
-    const valorBruto = progresso.percentual ?? progresso.percent ?? progresso.progresso;
-    const numero = valorBruto === null || valorBruto === undefined || valorBruto === '' ? null : Number(valorBruto);
-    const percentual = Number.isFinite(numero) ? Math.min(100, Math.max(0, Math.round(numero))) : null;
-
-    textoAndamento.textContent = mensagem;
-    if (percentual === null) {
-      percentualAndamento.textContent = '';
-      barraAndamento.classList.add('importacao-barra--indeterminada');
-      barraAndamento.removeAttribute('aria-valuenow');
-      barraAndamento.querySelector('i').style.width = '';
-    } else {
-      percentualAndamento.textContent = `${percentual}%`;
-      barraAndamento.classList.remove('importacao-barra--indeterminada');
-      barraAndamento.setAttribute('aria-valuemin', '0');
-      barraAndamento.setAttribute('aria-valuemax', '100');
-      barraAndamento.setAttribute('aria-valuenow', String(percentual));
-      barraAndamento.querySelector('i').style.width = `${percentual}%`;
-    }
-  }
-
-  function definirOcupado(novoEstado, tipo = '', botao = null) {
-    ocupado = novoEstado;
-    tipoEmAndamento = novoEstado ? tipo : '';
-    fontes.setAttribute('aria-busy', String(novoEstado));
-    controles.forEach((controle) => { controle.disabled = novoEstado; });
-
-    if (novoEstado && botao) {
-      botaoEmAndamento = botao;
-      conteudoOriginalBotao = botao.innerHTML;
-      botao.setAttribute('aria-busy', 'true');
-      botao.textContent = tipo === 'backup' ? 'Importando backup…' : 'Importando tabela…';
-    } else if (botaoEmAndamento) {
-      botaoEmAndamento.innerHTML = conteudoOriginalBotao;
-      botaoEmAndamento.removeAttribute('aria-busy');
-      botaoEmAndamento = null;
-      conteudoOriginalBotao = '';
-    }
-  }
-
-  async function atualizarDadosDaTela() {
-    try {
-      const dados = await api.bootstrap();
-      if (dados && typeof dados === 'object') {
-        aplicarBootstrap(dados);
-        aoConcluir();
-        return;
-      }
-    } catch {
-      // O fallback abaixo ainda atualiza a lista quando o bootstrap não estiver disponível.
-    }
-    try {
-      estado.clientes = await api.listCustomers();
-    } catch {
-      // A importação já foi concluída; uma futura navegação recarregará o estado persistido.
-    }
-    aoConcluir();
-  }
-
-  function renderizarResultadoTabela(resultado) {
-    const arquivo = nomeArquivoSeguro(resultado.arquivo) || 'Tabela importada';
-    areaResultado.innerHTML = `
-      <div class="resultado-importacao__cartao resultado-importacao__cartao--sucesso">
-        <div class="resultado-importacao__titulo">${Icone.check}<div><strong>Base de clientes atualizada</strong><p>${escaparHtml(arquivo)} (${escaparHtml(resultado.formato || 'formato identificado')})</p></div></div>
-        <div class="resultado-importacao__metricas">
-          <div><strong>${numeroSeguro(resultado.created)}</strong><span>novos</span></div>
-          <div><strong>${numeroSeguro(resultado.updated)}</strong><span>atualizados</span></div>
-          <div><strong>${numeroSeguro(resultado.totalLido)}</strong><span>linhas lidas</span></div>
-          <div><strong>${numeroSeguro(resultado.invalidos)}</strong><span>ignoradas</span></div>
-        </div>
-      </div>`;
-  }
-
-  function renderizarResultadoBackup(resultado) {
-    const definicoes = [
-      ['Clientes', ['resumo.clientes', 'resumo.totalClientes', 'clientesImportados', 'totalClientes', 'clientes']],
-      ['Pedidos', ['resumo.pedidos', 'resumo.compras', 'pedidosImportados', 'totalPedidos', 'pedidos']],
-      ['Itens', ['resumo.itens', 'itensImportados', 'totalItens', 'itens']],
-      ['Pagamentos', ['resumo.pagamentos', 'pagamentosImportados', 'totalPagamentos', 'pagamentos']],
-      ['Produtos', ['resumo.produtos', 'produtosImportados', 'totalProdutos', 'produtos']],
-      ['Entregas', ['resumo.entregas', 'entregasImportadas', 'totalEntregas', 'entregas']],
-      ['Lançamentos no fiado', ['resumo.contaCorrente', 'contaCorrenteImportada', 'totalContaCorrente', 'contaCorrente']],
-      ['Perfis calculados', ['resumo.perfis', 'perfisCalculados', 'totalPerfis', 'perfis']],
-    ];
-    const metricas = definicoes
-      .map(([rotulo, caminhos]) => [rotulo, primeiraContagem(resultado, caminhos)])
-      .filter(([, quantidade]) => quantidade !== null);
-    const arquivo = nomeArquivoSeguro(resultado.arquivo || resultado.nomeArquivo) || 'Backup do Consumer';
-    const avisos = Array.isArray(resultado.avisos)
-      ? resultado.avisos.filter(Boolean)
-      : (resultado.aviso ? [resultado.aviso] : []);
-
-    const duplicada = String(resultado.status || '').toLowerCase() === 'duplicada';
-    areaResultado.innerHTML = `
-      <div class="resultado-importacao__cartao resultado-importacao__cartao--sucesso">
-        <div class="resultado-importacao__titulo">${Icone.check}<div><strong>${duplicada ? 'Backup já estava importado' : 'Backup importado com sucesso'}</strong><p>${escaparHtml(arquivo)}${duplicada ? ' — nenhuma informação foi duplicada.' : ''}</p></div></div>
-        ${metricas.length ? `<div class="resultado-importacao__metricas">${metricas.map(([rotulo, quantidade]) => `<div><strong>${quantidade.toLocaleString('pt-BR')}</strong><span>${escaparHtml(rotulo)}</span></div>`).join('')}</div>` : '<p class="resultado-importacao__mensagem">Os dados disponíveis no backup foram incorporados à base local.</p>'}
-        ${avisos.length ? `<ul class="resultado-importacao__avisos">${avisos.map((aviso) => `<li>${escaparHtml(aviso)}</li>`).join('')}</ul>` : ''}
-      </div>`;
-  }
-
-  function renderizarFalha(mensagem) {
-    areaResultado.innerHTML = `
-      <div class="resultado-importacao__cartao resultado-importacao__cartao--erro" role="alert">
-        <div class="resultado-importacao__titulo">${Icone.aviso}<div><strong>Não foi possível concluir a importação</strong><p>${escaparHtml(mensagem)}</p></div></div>
-      </div>`;
-  }
-
-  async function executarImportacao({ tipo, botao, chamar }) {
-    if (ocupado) return;
-    limparErroLink();
-    areaResultado.innerHTML = '';
-    definirOcupado(true, tipo, botao);
-    if (tipo === 'backup') atualizarProgresso({ mensagem: 'Preparando o backup para importação…' });
-    else areaAndamento.hidden = true;
-    try {
-      const resultado = await chamar();
-      if (resultado?.cancelado) {
-        areaAndamento.hidden = true;
-        return;
-      }
-      if (tipo === 'backup') atualizarProgresso({ etapa: 'concluido', percentual: 100 });
-      await atualizarDadosDaTela();
-      if (tipo === 'backup') renderizarResultadoBackup(resultado || {});
-      else renderizarResultadoTabela(resultado || {});
-      const backupDuplicado = tipo === 'backup' && String(resultado?.status || '').toLowerCase() === 'duplicada';
-      mostrarToast(
-        backupDuplicado
-          ? 'Esse backup já estava na base'
-          : (tipo === 'backup' ? 'Histórico do Consumer importado' : 'Base de clientes atualizada'),
-        'sucesso',
-      );
-    } catch (error) {
-      areaAndamento.hidden = true;
-      const mensagem = mensagemDeErro(error, 'Não foi possível importar o arquivo.');
-      renderizarFalha(mensagem);
-      mostrarToast(mensagem, 'erro');
-    } finally {
-      definirOcupado(false);
-    }
-  }
-
-  cancelarProgresso = api.onConsumerBackupProgress(atualizarProgresso);
-
-  botaoBackupLocal.addEventListener('click', () => executarImportacao({
-    tipo: 'backup',
-    botao: botaoBackupLocal,
-    chamar: () => api.importConsumerBackup(),
-  }));
-
-  formularioLink.addEventListener('submit', (evento) => {
-    evento.preventDefault();
-    const validacao = validarLinkBackupGoogleDrive(campoLink.value);
-    if (!validacao.valido) {
-      mostrarErroLink(validacao.erro);
-      return;
-    }
-    executarImportacao({
-      tipo: 'backup',
-      botao: botaoBackupLink,
-      chamar: () => api.importConsumerBackupFromUrl(validacao.url),
-    });
-  });
-
-  campoLink.addEventListener('input', limparErroLink);
-  botaoTabela.addEventListener('click', () => executarImportacao({
-    tipo: 'tabela',
-    botao: botaoTabela,
-    chamar: () => api.importCustomers(),
-  }));
 }

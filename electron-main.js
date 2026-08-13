@@ -5,8 +5,6 @@ const path = require('path');
 
 app.setName('Vale Verde Dashboard');
 const userDataPath = app.getPath('userData');
-const localListsPath = path.join(process.cwd(), 'listas');
-if (!process.env.VALEVERDE_LISTS_DIR && fs.existsSync(localListsPath)) process.env.VALEVERDE_LISTS_DIR = localListsPath;
 process.env.VALEVERDE_DATA_DIR ||= path.join(userDataPath, 'data');
 process.env.VALEVERDE_REPORTS_DIR ||= path.join(userDataPath, 'reports');
 process.env.VALEVERDE_TEMPLATES_DIR ||= path.join(userDataPath, 'templates');
@@ -15,13 +13,10 @@ process.env.VALEVERDE_AUTH_DIR ||= path.join(userDataPath, 'whatsapp-auth');
 const whatsapp = require('./core/whatsapp');
 const database = require('./core/database');
 const templates = require('./core/templates-store');
-const importer = require('./core/importer');
 const sender = require('./core/sender');
 const report = require('./core/report');
 const gemini = require('./core/gemini');
 const { AiCredentialStore } = require('./core/ai-credentials');
-const aiSpreadsheets = require('./core/ai-spreadsheets');
-const listSync = require('./core/sync-lists');
 const pixUtils = require('./core/pix');
 const defaults = require('./config');
 
@@ -34,8 +29,433 @@ gemini.configureProviderResolver(() => aiCredentialStore.getActiveCredential());
 
 let mainWindow;
 let activeCampaign = null;
+let consumerBackupImportActive = false;
+let consumerDataCache = null;
+let consumerBackupSyncService = null;
 const verifiedCampaignTests = new Map();
 const TEST_VALIDITY_MS = 60 * 60 * 1000;
+
+function consumerDatabasePath() {
+    return path.join(process.env.VALEVERDE_DATA_DIR, 'consumer-analytics.sqlite');
+}
+
+function readConsumerData() {
+    const databasePath = consumerDatabasePath();
+    if (!fs.existsSync(databasePath)) {
+        return { imports: [], profiles: [], summary: null, error: '' };
+    }
+
+    const stats = fs.statSync(databasePath);
+    const signature = `${stats.size}:${stats.mtimeMs}`;
+    if (consumerDataCache?.signature === signature) return consumerDataCache.value;
+
+    let store;
+    try {
+        const { createConsumerStore } = require('./core/consumer-store');
+        store = createConsumerStore({ databasePath }).initialize();
+        const imports = store.listImports({ limit: 100 });
+        if (imports[0]) store.reconcileCompletedImportAsAuthoritative(imports[0].id);
+        const profiles = [];
+        const pageSize = 1000;
+        for (let offset = 0; ; offset += pageSize) {
+            const page = store.listCustomerProfiles({ limit: pageSize, offset });
+            profiles.push(...page);
+            if (page.length < pageSize) break;
+        }
+        const value = {
+            imports,
+            profiles,
+            summary: imports.length ? store.getBusinessSummary() : null,
+            error: '',
+        };
+        consumerDataCache = { signature, value };
+        return value;
+    } catch (error) {
+        console.error('Falha ao ler a base analitica do Consumer:', error);
+        return { imports: [], profiles: [], summary: null, error: String(error?.message || error) };
+    } finally {
+        store?.close();
+    }
+}
+
+function readConsumerHistoryProfiles() {
+    const consumer = readConsumerData();
+    if (!consumer.imports.length) return [];
+    if (Array.isArray(consumer.historyProfiles)) return consumer.historyProfiles;
+
+    let store;
+    try {
+        const { createConsumerStore } = require('./core/consumer-store');
+        store = createConsumerStore({ databasePath: consumerDatabasePath() }).initialize();
+        const profiles = [];
+        const pageSize = 500;
+        for (let offset = 0; ; offset += pageSize) {
+            const page = store.listCustomerProfiles({ limit: pageSize, offset, includeHistory: true });
+            profiles.push(...page);
+            if (page.length < pageSize) break;
+        }
+        consumer.historyProfiles = profiles;
+        return profiles;
+    } catch (error) {
+        console.error('Falha ao ler os historicos detalhados do Consumer:', error);
+        return [];
+    } finally {
+        store?.close();
+    }
+}
+
+function getConsumerCustomerProfile(sourceKey, externalId) {
+    const safeSourceKey = String(sourceKey || '').trim().slice(0, 200);
+    const safeExternalId = String(externalId || '').trim().slice(0, 200);
+    if (!safeSourceKey || !safeExternalId || !fs.existsSync(consumerDatabasePath())) return null;
+
+    let store;
+    try {
+        const { createConsumerStore } = require('./core/consumer-store');
+        store = createConsumerStore({ databasePath: consumerDatabasePath() }).initialize();
+        const profile = store.getCustomerProfile({
+            sourceKey: safeSourceKey,
+            externalId: safeExternalId,
+            includeHistory: true,
+        });
+        if (!profile) return null;
+        const { publicConsumerProfile } = require('./core/consumer-profiles');
+        return publicConsumerProfile(profile);
+    } finally {
+        store?.close();
+    }
+}
+
+function operationalCustomerData() {
+    const existing = database.listCustomers();
+    const consumer = readConsumerData();
+    if (!consumer.profiles.length) {
+        return {
+            customers: existing,
+            consumer,
+            links: { existing: existing.length, profiles: 0, matched: 0, created: 0, pending: 0 },
+        };
+    }
+    const { combineConsumerCustomers } = require('./core/consumer-profiles');
+    const combined = combineConsumerCustomers(existing, consumer.profiles);
+    return { customers: combined.customers, consumer, links: combined.stats };
+}
+
+function listOperationalCustomers() {
+    return operationalCustomerData().customers;
+}
+
+function loadConsumerBackupImporter() {
+    // O Firebird e o SQLite so sao carregados quando o usuario inicia uma importacao.
+    // Assim, uma dependencia ausente ou uma instalacao antiga nao impede o app de abrir.
+    const consumerBackup = require('./core/consumer-backup');
+    if (typeof consumerBackup?.importConsumerBackup !== 'function') {
+        throw new Error('O importador de backup do Consumer nao esta disponivel nesta instalacao.');
+    }
+    return consumerBackup.importConsumerBackup;
+}
+
+function emitConsumerBackupProgress(event, progress) {
+    const sender = event?.sender;
+    if (!sender || sender.isDestroyed()) return;
+    const payload = progress && typeof progress === 'object'
+        ? { ...progress }
+        : { mensagem: String(progress || 'Processando o backup do Consumer...') };
+    sender.send('consumer-backup:progress', payload);
+}
+
+function backupFileName(result = {}, fallback = '') {
+    const candidate = result.arquivo || result.nomeArquivo || result.fileName || fallback;
+    return path.basename(String(candidate || 'backup-consumer.fbconsumer'));
+}
+
+function backupSignature(result = {}) {
+    return String(
+        result.assinatura
+        || result.sha256
+        || result.hash
+        || result.source?.sha256
+        || '',
+    );
+}
+
+function backupRowsRead(result = {}) {
+    if (Number.isFinite(Number(result.totalLido))) return Number(result.totalLido);
+    const summary = result.resumo && typeof result.resumo === 'object' ? result.resumo : {};
+    return ['clientes', 'pedidos', 'itens', 'pagamentos', 'produtos', 'entregas', 'contaCorrente']
+        .reduce((total, field) => total + (Number.isFinite(Number(summary[field])) ? Number(summary[field]) : 0), 0);
+}
+
+function saveConsumerBackupMetadata(result = {}, fallbackFileName = '') {
+    const { dataFileFormat } = require('./core/data-import');
+    const signature = backupSignature(result);
+    const importId = String(result.importacaoId || result.importId || result.id || signature || Date.now());
+    const resultStatus = String(result.status || '').toLowerCase();
+    const unchanged = ['duplicada', 'duplicate', 'anterior', 'older', 'atualizada', 'up_to_date'].includes(resultStatus);
+    const rowsRead = backupRowsRead(result);
+    return database.saveImportMetadata({
+        id: `consumer:${importId}`,
+        arquivo: backupFileName(result, fallbackFileName),
+        tipo: 'consumer-backup',
+        formato: dataFileFormat(backupFileName(result, fallbackFileName), 'FIREBIRD'),
+        assinatura: signature,
+        status: 'concluida',
+        totalLido: rowsRead,
+        created: unchanged ? 0 : rowsRead,
+        updated: 0,
+        ignored: unchanged ? rowsRead : 0,
+        erro: '',
+    });
+}
+
+function saveConsumerBackupError(error, fallbackFileName = '') {
+    try {
+        const { dataFileFormat } = require('./core/data-import');
+        database.saveImportMetadata({
+            id: `consumer:erro:${Date.now()}`,
+            arquivo: path.basename(String(fallbackFileName || 'backup-consumer.fbconsumer')),
+            tipo: 'consumer-backup',
+            formato: dataFileFormat(fallbackFileName, 'FIREBIRD'),
+            status: 'erro',
+            erro: String(error?.message || error || 'Falha ao importar o backup.').slice(0, 1000),
+        });
+    } catch {
+        // A falha de auditoria nao deve esconder o erro original da importacao.
+    }
+}
+
+async function runConsumerBackupImport(event, options, fallbackFileName) {
+    if (consumerBackupImportActive) {
+        throw new Error('Ja existe uma importacao de backup do Consumer em andamento.');
+    }
+
+    consumerBackupImportActive = true;
+    try {
+        const importConsumerBackup = loadConsumerBackupImporter();
+        const result = await importConsumerBackup({
+            ...options,
+            onProgress: (progress) => emitConsumerBackupProgress(event, progress),
+        });
+        consumerDataCache = null;
+        const normalizedStatus = normalizeConsumerImportStatus(result);
+        const normalized = {
+            cancelado: false,
+            ...(result && typeof result === 'object' ? result : {}),
+            status: normalizedStatus,
+            arquivo: backupFileName(result, fallbackFileName),
+        };
+        const operational = operationalCustomerData();
+        normalized.vinculacao = operational.links;
+        if (operational.links.pending > 0) {
+            normalized.avisos = [
+                ...(Array.isArray(normalized.avisos) ? normalized.avisos : []),
+                `${operational.links.pending} perfil(is) possuem CPF/CNPJ ou telefone compartilhado e ficaram pendentes para evitar unir pessoas diferentes.`,
+            ];
+        }
+        saveConsumerBackupMetadata(normalized, fallbackFileName);
+        return normalized;
+    } catch (error) {
+        saveConsumerBackupError(error, fallbackFileName);
+        throw error;
+    } finally {
+        consumerBackupImportActive = false;
+    }
+}
+
+function normalizeConsumerImportStatus(result = {}) {
+    const status = String(result.status || '').toLowerCase();
+    if (['duplicate', 'duplicated', 'duplicada'].includes(status)) return 'duplicada';
+    if (status === 'older') return 'anterior';
+    if (status === 'up_to_date') return 'atualizada';
+    return String(result.status || 'concluida');
+}
+
+function getConsumerBackupSyncService() {
+    if (consumerBackupSyncService) return consumerBackupSyncService;
+    const { createConsumerBackupSyncService } = require('./core/consumer-sync');
+    consumerBackupSyncService = createConsumerBackupSyncService({
+        importBackup: async (options) => {
+            if (consumerBackupImportActive) {
+                const error = new Error('Ja existe uma importacao de backup do Consumer em andamento.');
+                error.code = 'CONSUMER_IMPORT_BUSY';
+                throw error;
+            }
+            consumerBackupImportActive = true;
+            try {
+                const result = await loadConsumerBackupImporter()(options);
+                consumerDataCache = null;
+                const normalized = {
+                    cancelado: false,
+                    ...result,
+                    status: normalizeConsumerImportStatus(result),
+                    arquivo: backupFileName(result, options.sourceName),
+                };
+                const operational = operationalCustomerData();
+                normalized.vinculacao = operational.links;
+                saveConsumerBackupMetadata(normalized, options.sourceName);
+                return { ...result, vinculacao: operational.links };
+            } catch (error) {
+                saveConsumerBackupError(error, options.sourceName);
+                throw error;
+            } finally {
+                consumerBackupImportActive = false;
+            }
+        },
+        getConfig: () => database.getConfig(),
+        saveConfig: (patch) => database.saveConfig(patch),
+    });
+    consumerBackupSyncService.onStatus((status) => emitToRenderer('consumer-backup:sync-status', status));
+    return consumerBackupSyncService;
+}
+
+async function syncConsumerBackupFolder(event, input = {}) {
+    const url = String(input?.url || '').trim();
+    const sync = getConsumerBackupSyncService();
+    const result = await sync.sync({
+        url: url || undefined,
+        save: input?.save === true,
+        reason: input?.reason || 'manual',
+        onProgress: (progress) => emitConsumerBackupProgress(event, progress),
+    });
+    consumerDataCache = null;
+    const status = normalizeConsumerImportStatus(result);
+    const normalized = {
+        cancelado: false,
+        ...result,
+        status,
+        arquivo: backupFileName(result, result.fileName),
+        pastaSalva: input?.save === true || getConsumerBackupSyncService().getStatus().enabled,
+        sincronizadoEm: getConsumerBackupSyncService().getStatus().lastSyncedAt,
+    };
+    if (!normalized.resumo && result.importResult?.resumo) normalized.resumo = result.importResult.resumo;
+    if (!normalized.avisos && result.importResult?.avisos) normalized.avisos = result.importResult.avisos;
+    return normalized;
+}
+
+function startConsumerBackupSync(options = {}) {
+    const service = getConsumerBackupSyncService();
+    const started = service.start({
+        immediate: options.immediate !== false,
+        onProgress: (progress) => {
+            if (!mainWindow || mainWindow.isDestroyed()) return;
+            emitConsumerBackupProgress({ sender: mainWindow.webContents }, progress);
+        },
+        onResult: (result) => {
+            consumerDataCache = null;
+            emitToRenderer('consumer-backup:sync-status', service.getStatus());
+            if (String(result?.status || '').toLowerCase() === 'success') {
+                emitToRenderer('consumer-backup:data-updated', {
+                    updatedAt: new Date().toISOString(),
+                    importacaoId: String(result.importacaoId || result.importId || ''),
+                });
+            }
+        },
+        onError: (error) => {
+            console.error('Falha na sincronizacao automatica do backup Consumer:', error?.message || error);
+            emitToRenderer('consumer-backup:sync-status', service.getStatus());
+        },
+    });
+    return started;
+}
+
+async function runDataFileImport(event, filePath, options = {}) {
+    const {
+        classifyDataFile,
+        importDocumentDataFile,
+    } = require('./core/data-import');
+    const classification = classifyDataFile(filePath);
+    const sourceKind = String(options.sourceKind || 'local');
+    if (classification.kind === 'consumer-backup') {
+        const result = await runConsumerBackupImport(event, {
+            filePath,
+            sourceKind,
+            sourceName: options.sourceName || path.basename(filePath),
+            driveFileId: options.driveFileId,
+            backupCreatedAt: options.backupCreatedAt,
+            modifiedAt: options.modifiedAt,
+        }, options.sourceName || path.basename(filePath));
+        return {
+            ...result,
+            tipoImportacao: 'consumer-backup',
+            tipoFonte: sourceKind,
+        };
+    }
+
+    const result = await importDocumentDataFile(filePath, {
+        sourceKind,
+        sourceName: options.sourceName || path.basename(filePath),
+    });
+    return {
+        ...result,
+        tipoFonte: sourceKind,
+    };
+}
+
+async function runDataUrlImport(event, input = {}) {
+    const url = String(input?.url || '').trim();
+    if (!url) throw new Error('Informe o link compartilhado do Google Drive.');
+
+    const { parseGoogleDriveSourceUrl } = require('./core/google-drive-folder');
+    const parsed = parseGoogleDriveSourceUrl(url);
+    if (parsed.sourceType === 'folder') {
+        const result = await syncConsumerBackupFolder(event, {
+            url,
+            save: true,
+            reason: 'manual',
+        });
+        startConsumerBackupSync({ immediate: false });
+        return {
+            ...result,
+            tipoImportacao: 'consumer-backup',
+            tipoFonte: 'drive-folder',
+        };
+    }
+
+    const {
+        downloadGoogleDriveDataFile,
+        removeDownloadedDataFile,
+    } = require('./core/data-import');
+    let downloaded;
+    try {
+        emitConsumerBackupProgress(event, {
+            stage: 'download',
+            etapa: 'download',
+            message: 'Baixando o arquivo do Google Drive…',
+            mensagem: 'Baixando o arquivo do Google Drive…',
+            percent: 1,
+            percentual: 1,
+        });
+        downloaded = await downloadGoogleDriveDataFile(url, {
+            onProgress: ({ received, total }) => {
+                const percent = total ? Math.min(18, Math.max(1, Math.round((received / total) * 18))) : null;
+                emitConsumerBackupProgress(event, {
+                    stage: 'download',
+                    etapa: 'download',
+                    message: 'Baixando o arquivo do Google Drive…',
+                    mensagem: 'Baixando o arquivo do Google Drive…',
+                    receivedBytes: received,
+                    totalBytes: total,
+                    percent,
+                    percentual: percent,
+                });
+            },
+        });
+        return await runDataFileImport(event, downloaded.filePath, {
+            sourceKind: 'drive-file',
+            sourceName: downloaded.fileName,
+            driveFileId: downloaded.fileId,
+            modifiedAt: downloaded.modifiedAt,
+        });
+    } finally {
+        if (downloaded) {
+            try {
+                await removeDownloadedDataFile(downloaded);
+            } catch (error) {
+                console.error('Falha ao remover arquivo temporario do Google Drive:', error?.message || error);
+            }
+        }
+    }
+}
 
 function messageFingerprint(message, pix = {}) {
     const payload = JSON.stringify({
@@ -64,6 +484,7 @@ function appSettings() {
     const max = Number(saved.intervaloMax ?? secondsFromMilliseconds(defaults.tempoMax, 11));
     const pixFields = pixUtils.pixSettingsWithLegacyAliases(saved, defaults.pix || defaults);
     return {
+        ...saved,
         ...pixFields,
         intervaloMin: Math.max(3, Math.min(min || 5, 60)),
         intervaloMax: Math.max(5, Math.min(Math.max(max || 11, min || 5), 120)),
@@ -122,7 +543,14 @@ function aiPublicStatus() {
 }
 
 async function serializeBootstrap() {
-    const sincronizacao = await listSync.synchronizeLists();
+    const sincronizacao = {
+        automatico: false,
+        processados: 0,
+        ignorados: 0,
+        erros: 0,
+        detalhes: [],
+    };
+    const operational = operationalCustomerData();
     const aiPersistida = database.getAiState();
     const historicoGemini = gemini.getConversationHistory('dashboard', { limit: 80 }).map((message, index) => ({
         id: `gemini-${index}-${message.createdAt || Date.now()}`,
@@ -132,11 +560,18 @@ async function serializeBootstrap() {
         metadados: {},
     }));
     return {
-        clientes: database.listCustomers(),
+        clientes: operational.customers,
         produtos: database.listProducts(),
         relatorios: database.listReports(),
         importacoes: database.listImports(),
         sincronizacao,
+        consumer: {
+            resumo: operational.consumer.summary,
+            importacoes: operational.consumer.imports,
+            vinculacao: operational.links,
+            erro: operational.consumer.error,
+            sincronizacao: getConsumerBackupSyncService().getStatus(),
+        },
         templates: templates.listTemplates(),
         configuracoes: appSettings(),
         whatsapp: whatsapp.getStatus(),
@@ -150,9 +585,13 @@ async function serializeBootstrap() {
 
 async function aiOptions(options = {}) {
     const whatsappStatus = whatsapp.getStatus();
+    const consumer = readConsumerData();
     return {
         ...options,
-        spreadsheets: await aiSpreadsheets.loadSpreadsheetSources(listSync.LISTS_DIR),
+        budgetChars: options.budgetChars ?? 90000,
+        spreadsheets: [],
+        consumerAnalytics: consumer.summary || {},
+        consumerProfiles: readConsumerHistoryProfiles(),
         runtime: {
             whatsapp: {
                 status: whatsappStatus.status,
@@ -205,32 +644,40 @@ function validateCampaign(payload = {}) {
 function registerIpcHandlers() {
     ipcMain.handle('app:bootstrap', () => serializeBootstrap());
 
-    ipcMain.handle('lists:sync', () => listSync.synchronizeLists());
-
-    ipcMain.handle('customers:import', async () => {
+    ipcMain.handle('data-import:select-file', async (event) => {
         const selection = await dialog.showOpenDialog(mainWindow, {
-            title: 'Importar clientes',
+            title: 'Importar fonte de dados',
             properties: ['openFile'],
             filters: [
-                { name: 'Tabelas de clientes', extensions: ['xls', 'xlsx', 'csv', 'pdf'] },
-                { name: 'Todos os arquivos', extensions: ['*'] },
+                {
+                    name: 'Fontes de dados compatíveis',
+                    extensions: ['fb', 'fbconsumer', 'fbk', 'gbk', 'bak', 'backup', 'pdf', 'xls', 'xlsx', 'csv'],
+                },
+                { name: 'Backups Firebird / Consumer', extensions: ['fb', 'fbconsumer', 'fbk', 'gbk', 'bak', 'backup'] },
+                { name: 'Documentos e planilhas', extensions: ['pdf', 'xls', 'xlsx', 'csv'] },
             ],
         });
         if (selection.canceled || !selection.filePaths[0]) return { cancelado: true };
+        return runDataFileImport(event, selection.filePaths[0], { sourceKind: 'local' });
+    });
 
-        const parsed = await importer.parseImportFile(selection.filePaths[0]);
-        const result = database.importCustomers(parsed.rows, parsed.arquivo);
+    ipcMain.handle('data-import:from-url', (event, input = {}) => runDataUrlImport(event, input));
+
+    ipcMain.handle('consumer-backup:sync-status', () => getConsumerBackupSyncService().getStatus());
+    ipcMain.handle('consumer-backup:remove-folder', async () => {
+        const service = getConsumerBackupSyncService();
+        await service.disable();
         return {
-            cancelado: false,
-            arquivo: parsed.arquivo,
-            formato: parsed.formato,
-            totalLido: parsed.totalLido,
-            invalidos: parsed.invalidos,
-            ...result,
+            removida: true,
+            sincronizacao: service.getStatus(),
         };
     });
 
-    ipcMain.handle('customers:list', () => database.listCustomers());
+    ipcMain.handle('customers:list', () => listOperationalCustomers());
+    ipcMain.handle('consumer-profile:get', (_event, input = {}) => getConsumerCustomerProfile(
+        input?.sourceKey,
+        input?.externalId,
+    ));
     ipcMain.handle('reports:list', () => database.listReports());
     ipcMain.handle('reports:get', (_event, id) => database.getReport(id));
     ipcMain.handle('reports:show-in-folder', (_event, fileName) => {
@@ -304,8 +751,16 @@ function registerIpcHandlers() {
 
     ipcMain.handle('campaign:test', async (_event, input = {}) => {
         if (!whatsapp.isReady()) throw new Error('Conecte o WhatsApp antes de enviar o teste.');
-        const customerExample = database.listCustomers()[0];
-        if (!customerExample) throw new Error('Importe pelo menos um cliente real antes de enviar o teste.');
+        const operationalCustomers = listOperationalCustomers();
+        const requestedExampleId = String(input.clienteExemploId || '');
+        const customerExample = requestedExampleId
+            ? operationalCustomers.find((customer) => String(customer.id) === requestedExampleId)
+            : operationalCustomers[0];
+        if (!customerExample) {
+            throw new Error(requestedExampleId
+                ? 'O cliente usado na previa nao esta mais disponivel. Volte e revise os destinatarios.'
+                : 'Importe pelo menos um cliente real antes de enviar o teste.');
+        }
         const settings = appSettings();
         const pix = pixUtils.normalizePixSettings(settings.pix);
         const resultado = await sender.enviarTeste({
@@ -330,7 +785,7 @@ function registerIpcHandlers() {
         const campaign = validateCampaign(payload);
         verifiedCampaignTests.delete(String(payload.testeId || ''));
         const selectedIds = new Set(campaign.recipientIds);
-        const customers = database.listCustomers().filter((customer) => selectedIds.has(String(customer.id)));
+        const customers = listOperationalCustomers().filter((customer) => selectedIds.has(String(customer.id)));
         if (!customers.length) throw new Error('Os destinatarios selecionados nao estao mais disponiveis na base.');
 
         activeCampaign = { pausado: false, cancelado: false };
@@ -367,7 +822,7 @@ function registerIpcHandlers() {
     ipcMain.handle('gemini:status', () => aiPublicStatus());
     ipcMain.handle('gemini:executive-report', async () => {
         const response = await gemini.generateExecutiveReportDetailed(
-            database.listCustomers(),
+            listOperationalCustomers(),
             database.listProducts(),
             database.listImports(),
             database.listReports(),
@@ -377,7 +832,7 @@ function registerIpcHandlers() {
         return response;
     });
     ipcMain.handle('gemini:ask', async (_event, input = {}) => gemini.answerQuestionDetailed(
-        database.listCustomers(),
+        listOperationalCustomers(),
         database.listProducts(),
         database.listImports(),
         database.listReports(),
@@ -387,7 +842,7 @@ function registerIpcHandlers() {
     ));
     ipcMain.handle('gemini:diagnose', async () => {
         const response = await gemini.diagnoseOperationsDetailed(
-            database.listCustomers(),
+            listOperationalCustomers(),
             database.listProducts(),
             database.listImports(),
             database.listReports(),
@@ -397,7 +852,7 @@ function registerIpcHandlers() {
         return response;
     });
     ipcMain.handle('gemini:suggest-campaign', async (_event, input = {}) => gemini.suggestCampaignMessageDetailed(
-        database.listCustomers(),
+        listOperationalCustomers(),
         database.listProducts(),
         input,
         await aiOptions(),
@@ -453,6 +908,7 @@ app.whenReady().then(() => {
     registerIpcHandlers();
     whatsapp.on('status', (status) => emitToRenderer('whatsapp:status', status));
     createWindow();
+    mainWindow.webContents.once('did-finish-load', () => startConsumerBackupSync());
 });
 
 let encerramentoEmAndamento = false;
@@ -460,6 +916,7 @@ app.on('before-quit', (event) => {
     if (encerramentoEmAndamento) return;
     event.preventDefault();
     encerramentoEmAndamento = true;
+    consumerBackupSyncService?.stop();
     whatsapp.encerrar()
         .catch((error) => console.error('Falha ao encerrar o WhatsApp:', error))
         .finally(() => app.quit());

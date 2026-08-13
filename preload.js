@@ -8,10 +8,14 @@ function subscribe(channel, listener) {
 
 contextBridge.exposeInMainWorld('valeverdeAPI', {
     bootstrap: () => ipcRenderer.invoke('app:bootstrap'),
-    syncLists: () => ipcRenderer.invoke('lists:sync'),
-    importCustomers: () => ipcRenderer.invoke('customers:import'),
-    importConsumerBackup: () => ipcRenderer.invoke('consumer-backup:import-file'),
-    importConsumerBackupFromUrl: (url) => ipcRenderer.invoke('consumer-backup:import-url', { url }),
+    importDataFile: () => ipcRenderer.invoke('data-import:select-file'),
+    importDataFromUrl: (url) => ipcRenderer.invoke('data-import:from-url', { url }),
+    removeConsumerBackupFolder: () => ipcRenderer.invoke('consumer-backup:remove-folder'),
+    getConsumerBackupSyncStatus: () => ipcRenderer.invoke('consumer-backup:sync-status'),
+    getConsumerCustomerProfile: (sourceKey, externalId) => ipcRenderer.invoke('consumer-profile:get', {
+        sourceKey,
+        externalId,
+    }),
     listCustomers: () => ipcRenderer.invoke('customers:list'),
     listReports: () => ipcRenderer.invoke('reports:list'),
     getReport: (id) => ipcRenderer.invoke('reports:get', id),
@@ -39,6 +43,8 @@ contextBridge.exposeInMainWorld('valeverdeAPI', {
     clearGeminiHistory: () => ipcRenderer.invoke('gemini:clear-history'),
     onWhatsappStatus: (listener) => subscribe('whatsapp:status', listener),
     onConsumerBackupProgress: (listener) => subscribe('consumer-backup:progress', listener),
+    onConsumerBackupSyncStatus: (listener) => subscribe('consumer-backup:sync-status', listener),
+    onConsumerBackupDataUpdated: (listener) => subscribe('consumer-backup:data-updated', listener),
     onCampaignProgress: (listener) => subscribe('campaign:progress', listener),
     onCampaignFinished: (listener) => subscribe('campaign:finished', listener),
 });

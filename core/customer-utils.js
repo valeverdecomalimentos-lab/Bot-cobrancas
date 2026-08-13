@@ -34,6 +34,15 @@ function normalizeCpf(value) {
     return digits.length === 11 ? digits : '';
 }
 
+function normalizeCnpj(value) {
+    const digits = onlyDigits(value);
+    return digits.length === 14 ? digits : '';
+}
+
+function normalizeTaxId(value) {
+    return normalizeCpf(value) || normalizeCnpj(value);
+}
+
 function normalizePhoneDigits(value) {
     let digits = onlyDigits(value);
     if (!digits) return '';
@@ -161,7 +170,9 @@ function buildCustomerProfile(customer = {}) {
 
 function getPhoneFromAnyField(row, preferredPhone) {
     if (preferredPhone) return preferredPhone;
-    for (const value of Object.values(row || {})) {
+    for (const [key, value] of Object.entries(row || {})) {
+        const header = normalizedHeader(key);
+        if (header === 'doc' || /cpf|cnpj|documento|taxid/.test(header)) continue;
         const found = findPhoneInText(value);
         if (found) return found;
     }
@@ -172,8 +183,10 @@ function normalizeCustomer(input = {}, options = {}) {
     const row = input.linhaRaw && typeof input.linhaRaw === 'object' ? input.linhaRaw : input;
 
     const rawName = getField(row, ['nome', 'cliente', 'nomecliente', 'name']) ?? '';
-    const rawCpf = getField(row, ['cpf', 'documento', 'doc']) ?? input.cpf ?? '';
-    const rawPhoneField = getField(row, ['telefone', 'tel', 'celular', 'whatsapp', 'contato', 'numero']) ?? input.telefone ?? input.telefoneOriginal ?? '';
+    const rawTaxId = getField(row, ['cpf', 'cnpj', 'documento', 'document', 'taxId', 'tax_id', 'doc']) ?? input.cpf ?? input.cnpj ?? '';
+    const taxId = normalizeTaxId(rawTaxId || input.cpf || input.cnpj);
+    const phoneCandidate = getField(row, ['telefone', 'tel', 'celular', 'whatsapp', 'contato', 'numero']) ?? input.telefone ?? input.telefoneOriginal ?? '';
+    const rawPhoneField = taxId && onlyDigits(phoneCandidate) === taxId ? '' : phoneCandidate;
     const rawPhone = getPhoneFromAnyField(row, rawPhoneField);
     const parsedName = splitNamePhone(rawName);
 
@@ -186,8 +199,9 @@ function normalizeCustomer(input = {}, options = {}) {
     const rawStatus = getField(row, ['status', 'situacao', 'situação', 'estado']) ?? input.status ?? '';
     const phoneDigits = normalizePhoneDigits(rawPhone || parsedName.phone || input.telefone);
     const name = cleanText(input.nome || parsedName.name || rawName);
-    const cpf = normalizeCpf(rawCpf || input.cpf);
-    const identity = getPrimaryIdentity({ cpf, telefone: phoneDigits, nome: name });
+    const cpf = taxId.length === 11 ? taxId : '';
+    const cnpj = taxId.length === 14 ? taxId : '';
+    const identity = getPrimaryIdentity({ cpf, cnpj, telefone: phoneDigits, nome: name });
 
     if (!identity) return null;
 
@@ -202,6 +216,7 @@ function normalizeCustomer(input = {}, options = {}) {
         chaveCliente: identity,
         nome: name,
         cpf,
+        cnpj,
         telefone: phoneDigits,
         telefoneOriginal: cleanText(rawPhone || input.telefoneOriginal || phoneDigits),
         telefoneValido: phoneDigits ? toWhatsappId(phoneDigits) : null,
@@ -220,19 +235,49 @@ function normalizeCustomer(input = {}, options = {}) {
     };
 }
 
-function getIdentityKeys(customer = {}) {
+function getDocumentIdentityKeys(customer = {}) {
     const keys = [];
-    const cpf = normalizeCpf(customer.cpf);
-    const phone = normalizePhoneDigits(customer.telefone || customer.telefoneOriginal || customer.numero);
-    const name = slugify(customer.nome);
-    if (cpf) keys.push(`cpf:${cpf}`);
-    if (phone) keys.push(`tel:${phone}`);
-    if (name) keys.push(`nome:${name}`);
+    const documents = [customer.cpf, customer.cnpj, customer.documento, customer.document, customer.taxId, customer.tax_id, customer.doc]
+        .map(normalizeTaxId)
+        .filter((document, position, values) => document && values.indexOf(document) === position);
+
+    documents.forEach((document) => {
+        keys.push(`${document.length === 11 ? 'cpf' : 'cnpj'}:${document}`);
+    });
     return keys;
+}
+
+function getStrongIdentityKeys(customer = {}) {
+    const keys = getDocumentIdentityKeys(customer);
+    const phone = normalizePhoneDigits(customer.telefone || customer.telefoneOriginal || customer.numero);
+    if (phone) keys.push(`tel:${phone}`);
+    return keys;
+}
+
+function getNameIdentityKey(customer = {}) {
+    const name = slugify(customer.nome);
+    return name ? `nome:${name}` : '';
+}
+
+function getIdentityKeys(customer = {}) {
+    const nameKey = getNameIdentityKey(customer);
+    return [...getStrongIdentityKeys(customer), ...(nameKey ? [nameKey] : [])];
 }
 
 function getPrimaryIdentity(customer = {}) {
     return getIdentityKeys(customer)[0] || '';
+}
+
+function hasStrongIdentityConflict(existing = {}, incoming = {}) {
+    const existingDocuments = getDocumentIdentityKeys(existing);
+    const incomingDocuments = getDocumentIdentityKeys(incoming);
+    const documentsConflict = existingDocuments.length > 0
+        && incomingDocuments.length > 0
+        && !incomingDocuments.some((key) => existingDocuments.includes(key));
+    const existingPhone = normalizePhoneDigits(existing.telefone || existing.telefoneOriginal || existing.numero);
+    const incomingPhone = normalizePhoneDigits(incoming.telefone || incoming.telefoneOriginal || incoming.numero);
+    const phonesConflict = Boolean(existingPhone && incomingPhone && existingPhone !== incomingPhone);
+    return documentsConflict || phonesConflict;
 }
 
 function mergeCustomer(existing, incoming) {
@@ -243,6 +288,7 @@ function mergeCustomer(existing, incoming) {
 
     overwrite('nome', incoming.nome);
     overwrite('cpf', incoming.cpf);
+    overwrite('cnpj', incoming.cnpj);
     overwrite('telefone', incoming.telefone);
     overwrite('telefoneOriginal', incoming.telefoneOriginal);
     overwrite('telefoneValido', incoming.telefoneValido);
@@ -270,14 +316,51 @@ function mergeCustomer(existing, incoming) {
 
 function upsertCustomers(existingCustomers = [], incomingRows = [], options = {}) {
     const customers = [];
-    const index = new Map();
+    const strongIndex = new Map();
+    const nameIndex = new Map();
     const now = options.now || new Date().toISOString();
     let created = 0;
     let updated = 0;
     let ignored = 0;
 
+    const addToIndex = (index, key, position) => {
+        if (!key) return;
+        const positions = index.get(key) || new Set();
+        positions.add(position);
+        index.set(key, positions);
+    };
+
+    const removeFromIndex = (index, key, position) => {
+        if (!key) return;
+        const positions = index.get(key);
+        if (!positions) return;
+        positions.delete(position);
+        if (positions.size === 0) index.delete(key);
+    };
+
     const register = (customer, position) => {
-        getIdentityKeys(customer).forEach((key) => index.set(key, position));
+        getStrongIdentityKeys(customer).forEach((key) => addToIndex(strongIndex, key, position));
+        addToIndex(nameIndex, getNameIdentityKey(customer), position);
+    };
+
+    const unregister = (customer, position) => {
+        getStrongIdentityKeys(customer).forEach((key) => removeFromIndex(strongIndex, key, position));
+        removeFromIndex(nameIndex, getNameIdentityKey(customer), position);
+    };
+
+    const updateAt = (position, incoming) => {
+        unregister(customers[position], position);
+        customers[position] = mergeCustomer(customers[position], incoming);
+        register(customers[position], position);
+        updated += 1;
+    };
+
+    const create = (incoming) => {
+        delete incoming._temValorImportado;
+        delete incoming._temStatusImportado;
+        customers.push(incoming);
+        register(incoming, customers.length - 1);
+        created += 1;
     };
 
     existingCustomers.forEach((customer) => {
@@ -297,20 +380,45 @@ function upsertCustomers(existingCustomers = [], incomingRows = [], options = {}
             return;
         }
 
-        const matchKey = getIdentityKeys(incoming).find((key) => index.has(key));
-        if (matchKey) {
-            const position = index.get(matchKey);
-            customers[position] = mergeCustomer(customers[position], incoming);
-            register(customers[position], position);
-            updated += 1;
+        const strongKeys = getStrongIdentityKeys(incoming);
+        if (strongKeys.length > 0) {
+            const matchingPositions = new Set();
+            strongKeys.forEach((key) => {
+                strongIndex.get(key)?.forEach((position) => matchingPositions.add(position));
+            });
+
+            if (matchingPositions.size === 1) {
+                const [position] = matchingPositions;
+                if (hasStrongIdentityConflict(customers[position], incoming)) {
+                    ignored += 1;
+                    return;
+                }
+                updateAt(position, incoming);
+                return;
+            }
+
+            if (matchingPositions.size > 1) {
+                ignored += 1;
+                return;
+            }
+
+            create(incoming);
             return;
         }
 
-        delete incoming._temValorImportado;
-        delete incoming._temStatusImportado;
-        customers.push(incoming);
-        register(incoming, customers.length - 1);
-        created += 1;
+        const namePositions = nameIndex.get(getNameIdentityKey(incoming));
+        if (namePositions?.size === 1) {
+            const [position] = namePositions;
+            updateAt(position, incoming);
+            return;
+        }
+
+        if (namePositions?.size > 1) {
+            ignored += 1;
+            return;
+        }
+
+        create(incoming);
     });
 
     customers.sort((a, b) => cleanText(a.nome || a.telefone).localeCompare(cleanText(b.nome || b.telefone), 'pt-BR'));

@@ -135,6 +135,62 @@ test('restaura em read_only, usa credenciais no ambiente e sempre limpa o FDB', 
     }
 });
 
+test('arquivo .fb que não é gbak é consultado somente por uma cópia isolada', async () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'consumer-extractor-raw-fb-'));
+    const databaseSource = path.join(temporaryRoot, 'consumer-sintetico.fb');
+    const original = Buffer.from('banco-firebird-sintetico');
+    fs.writeFileSync(databaseSource, original);
+    const calls = [];
+
+    try {
+        const snapshot = await extractConsumerBackup(databaseSource, {
+            tempRoot: temporaryRoot,
+            tools: { gbak: 'C:\\ferramentas\\gbak.exe', isql: 'C:\\ferramentas\\isql.exe', major: 4 },
+            verifyTools: false,
+            exec: async (command, args, options) => {
+                calls.push({ command, args, options });
+                if (command.endsWith('gbak.exe')) throw new Error('nao e um stream gbak');
+                assert.ok(args.at(-1).startsWith('localhost:'));
+                assert.notEqual(args.at(-1), databaseSource);
+                return { code: 0, stdout: '', stderr: '' };
+            },
+        });
+
+        assert.equal(snapshot.source.format, 'consumer-firebird-database-copy');
+        assert.equal(calls.length, ENTITY_DEFINITIONS.length + 1);
+        assert.deepEqual(fs.readFileSync(databaseSource), original);
+        assert.deepEqual(
+            fs.readdirSync(temporaryRoot).filter((name) => name.startsWith('valeverde-consumer-')),
+            [],
+        );
+    } finally {
+        fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+});
+
+test('aceita aliases gbak mas nunca usa fallback de banco bruto para eles', async () => {
+    const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'consumer-alias-test-'));
+    const backupPath = path.join(temporaryRoot, 'backup.gbk');
+    fs.writeFileSync(backupPath, 'backup-sintetico');
+    let processCalls = 0;
+    try {
+        await assert.rejects(extractConsumerBackup(backupPath, {
+            tempRoot: temporaryRoot,
+            gbakPath: 'gbak',
+            isqlPath: 'isql',
+            exec: async () => {
+                processCalls += 1;
+                const error = new Error('nao e um backup valido');
+                error.code = 1;
+                throw error;
+            },
+        }), (error) => error.code === 'RESTORE_FAILED');
+        assert.equal(processCalls, 1);
+    } finally {
+        fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+});
+
 test('remove a restauracao parcial quando uma consulta falha', async () => {
     const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'consumer-extractor-failure-'));
     const backupPath = path.join(temporaryRoot, 'backup-sintetico.fbconsumer');

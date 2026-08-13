@@ -1,5 +1,6 @@
 import {
   TIPOS_CHAVE_PIX,
+  aplicarBootstrap,
   atualizarEstadoGemini,
   configPixComAliases,
   estado,
@@ -34,6 +35,433 @@ const PROVEDORES_IA = Object.freeze({
   },
 });
 
+const ETAPAS_BACKUP = Object.freeze({
+  baixando: 'Baixando o backup do Google Drive…',
+  download: 'Baixando o backup do Google Drive…',
+  downloading: 'Baixando o backup do Google Drive…',
+  listando: 'Localizando o backup mais recente da pasta…',
+  listing: 'Localizando o backup mais recente da pasta…',
+  validando: 'Validando o arquivo de backup…',
+  validacao: 'Validando o arquivo de backup…',
+  validating: 'Validando o arquivo de backup…',
+  restaurando: 'Restaurando uma cópia temporária…',
+  restauracao: 'Restaurando uma cópia temporária…',
+  restoring: 'Restaurando uma cópia temporária…',
+  extraindo: 'Lendo clientes, pedidos, produtos e pagamentos…',
+  extracao: 'Lendo clientes, pedidos, produtos e pagamentos…',
+  extracting: 'Lendo clientes, pedidos, produtos e pagamentos…',
+  gravando: 'Atualizando a base analítica local…',
+  persistencia: 'Atualizando a base analítica local…',
+  persisting: 'Atualizando a base analítica local…',
+  'calculando-perfis': 'Recalculando os perfis completos dos clientes…',
+  limpando: 'Removendo os arquivos temporários…',
+  concluido: 'Importação concluída.',
+  completed: 'Importação concluída.',
+});
+
+export function validarLinkBackupGoogleDrive(valor) {
+  const texto = String(valor || '').trim();
+  if (!texto) return { valido: false, erro: 'Cole o link compartilhado do arquivo ou da pasta de backups.' };
+  if (texto.length > 2048) return { valido: false, erro: 'O link informado é muito longo.' };
+
+  let url;
+  try {
+    url = new URL(texto);
+  } catch {
+    return { valido: false, erro: 'Informe um link válido do Google Drive.' };
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (url.protocol !== 'https:' || host !== 'drive.google.com') {
+    return { valido: false, erro: 'Use um link HTTPS compartilhado pelo Google Drive.' };
+  }
+
+  const idPasta = url.pathname.match(/\/(?:drive(?:\/u\/\d+)?\/)?folders\/([^/]+)/i)?.[1];
+  if (idPasta) return { valido: true, tipo: 'pasta', id: idPasta, url: url.toString(), erro: '' };
+
+  const idArquivo = url.pathname.match(/\/file\/d\/([^/]+)/i)?.[1]
+    || url.searchParams.get('id');
+  if (idArquivo) return { valido: true, tipo: 'arquivo', id: idArquivo, url: url.toString(), erro: '' };
+
+  return { valido: false, erro: 'Não foi possível identificar um arquivo ou uma pasta nesse link do Google Drive.' };
+}
+
+function numeroImportacao(valor) {
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? numero : 0;
+}
+
+function valorNoCaminho(origem, caminho) {
+  return caminho.split('.').reduce((valor, chave) => valor?.[chave], origem);
+}
+
+function contagemDoValor(valor) {
+  if (Array.isArray(valor)) return valor.length;
+  if (valor && typeof valor === 'object') {
+    for (const chave of ['total', 'quantidade', 'importados', 'count']) {
+      if (Object.hasOwn(valor, chave)) return contagemDoValor(valor[chave]);
+    }
+    return null;
+  }
+  if (valor === null || valor === undefined || valor === '') return null;
+  const numero = Number(valor);
+  return Number.isFinite(numero) ? Math.max(0, numero) : null;
+}
+
+function primeiraContagem(resultado, caminhos) {
+  for (const caminho of caminhos) {
+    const contagem = contagemDoValor(valorNoCaminho(resultado, caminho));
+    if (contagem !== null) return contagem;
+  }
+  return null;
+}
+
+function nomeArquivoSeguro(valor) {
+  return String(valor || '').split(/[\\/]/).pop().trim();
+}
+
+function sincronizacaoConsumerAtual() {
+  const candidatos = [
+    estado.consumer?.sincronizacao,
+    estado.consumer?.sincronizacaoDrive,
+    estado.consumer?.sync,
+    estado.config?.consumerBackupSync,
+    estado.config?.sincronizacaoConsumer,
+    estado.config?.backupConsumer,
+  ];
+  return candidatos.find((item) => item && typeof item === 'object') || {};
+}
+
+function urlPastaSalva() {
+  const sync = sincronizacaoConsumerAtual();
+  return String(sync.url || sync.folderUrl || sync.pastaUrl || sync.link || '').trim();
+}
+
+function formatarDataSincronizacao(valor) {
+  const instante = Date.parse(String(valor || ''));
+  if (!Number.isFinite(instante)) return '';
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'America/Sao_Paulo',
+  }).format(instante).replace(',', ' às');
+}
+
+function montarFontesDados(tela) {
+  const fontes = tela.querySelector('#fontes-importacao');
+  const botaoArquivoLocal = tela.querySelector('[data-arquivo-local]');
+  const botaoBackupLink = tela.querySelector('[data-backup-link]');
+  const formularioLink = tela.querySelector('#form-backup-drive');
+  const campoLink = tela.querySelector('#campo-link-backup');
+  const ajudaLink = tela.querySelector('#ajuda-link-backup');
+  const erroLink = tela.querySelector('#erro-link-backup');
+  const areaAndamento = tela.querySelector('#andamento-importacao');
+  const textoAndamento = tela.querySelector('#texto-andamento');
+  const percentualAndamento = tela.querySelector('#percentual-andamento');
+  const barraAndamento = tela.querySelector('#barra-importacao');
+  const areaResultado = tela.querySelector('#resultado-importacao');
+  const statusSincronizacao = tela.querySelector('#status-sincronizacao-consumer');
+  const controles = [botaoArquivoLocal, botaoBackupLink, campoLink];
+  let ocupado = false;
+  let removendoPasta = false;
+  let tipoEmAndamento = '';
+  let botaoEmAndamento = null;
+  let conteudoOriginalBotao = '';
+
+  function limparErroLink() {
+    erroLink.hidden = true;
+    erroLink.textContent = '';
+    campoLink.removeAttribute('aria-invalid');
+  }
+
+  function mostrarErroLink(mensagem) {
+    erroLink.textContent = mensagem;
+    erroLink.hidden = false;
+    campoLink.setAttribute('aria-invalid', 'true');
+    campoLink.focus();
+  }
+
+  function renderizarStatusSincronizacao(resultado = null) {
+    const sync = sincronizacaoConsumerAtual();
+    const data = formatarDataSincronizacao(
+      resultado?.sincronizadoEm || resultado?.syncedAt || resultado?.importadoEm
+      || sync.ultimaSincronizacao || sync.lastSyncedAt || sync.sincronizadoEm || sync.updatedAt,
+    );
+    const arquivo = nomeArquivoSeguro(
+      resultado?.arquivo || resultado?.nomeArquivo
+      || sync.ultimoArquivo || sync.latestFileName || sync.lastFileName || sync.arquivo,
+    );
+    const pastaConfigurada = !resultado?.removida && Boolean(
+      resultado?.pastaSalva || resultado?.folderSaved || resultado?.folderUrl
+      || urlPastaSalva() || sync.salva || sync.saved || sync.ativa || sync.enabled,
+    );
+    statusSincronizacao.innerHTML = `
+      <span class="status-fonte-dados__indicador ${pastaConfigurada ? 'status-fonte-dados__indicador--ativo' : ''}" aria-hidden="true"></span>
+      <div>
+        <strong>${pastaConfigurada ? 'Pasta do Google Drive configurada' : 'Sincronização automática ainda não configurada'}</strong>
+        <p>${data ? `Última sincronização: ${escaparHtml(data)}${arquivo ? ` · ${escaparHtml(arquivo)}` : ''}.` : 'Cole o link de uma pasta para salvar a fonte e buscar sempre o backup mais recente.'}</p>
+        ${pastaConfigurada ? '<button class="status-fonte-dados__remover" type="button" data-remover-pasta-sync>Remover pasta sincronizada</button>' : ''}
+      </div>`;
+  }
+
+  function atualizarModoLink() {
+    limparErroLink();
+    const parecePasta = /\/folders\//i.test(campoLink.value);
+    botaoBackupLink.textContent = parecePasta ? 'Salvar e sincronizar agora' : 'Importar arquivo';
+    ajudaLink.innerHTML = parecePasta
+      ? '<strong>Pasta recomendada:</strong> ela ficará salva e cada sincronização usará o backup compatível mais recente.'
+      : 'Aceita arquivo específico em formato compatível ou uma pasta de backups. Prefira a pasta para manter os perfis atualizados.';
+  }
+
+  function atualizarProgresso(progresso = {}) {
+    if (!ocupado || !['arquivo', 'url', 'pasta'].includes(tipoEmAndamento)) return;
+    areaAndamento.hidden = false;
+    const etapa = String(progresso.etapa || progresso.stage || progresso.status || '').toLowerCase();
+    const mensagem = String(progresso.mensagem || progresso.message || ETAPAS_BACKUP[etapa] || 'Processando o backup…');
+    const valorBruto = progresso.percentual ?? progresso.percent ?? progresso.progresso;
+    const numero = valorBruto === null || valorBruto === undefined || valorBruto === '' ? null : Number(valorBruto);
+    const percentual = Number.isFinite(numero) ? Math.min(100, Math.max(0, Math.round(numero))) : null;
+    textoAndamento.textContent = mensagem;
+    if (percentual === null) {
+      percentualAndamento.textContent = '';
+      barraAndamento.classList.add('importacao-barra--indeterminada');
+      barraAndamento.removeAttribute('aria-valuenow');
+      barraAndamento.querySelector('i').style.width = '';
+    } else {
+      percentualAndamento.textContent = `${percentual}%`;
+      barraAndamento.classList.remove('importacao-barra--indeterminada');
+      barraAndamento.setAttribute('aria-valuemin', '0');
+      barraAndamento.setAttribute('aria-valuemax', '100');
+      barraAndamento.setAttribute('aria-valuenow', String(percentual));
+      barraAndamento.querySelector('i').style.width = `${percentual}%`;
+    }
+  }
+
+  function definirOcupado(novoEstado, tipo = '', botao = null) {
+    ocupado = novoEstado;
+    tipoEmAndamento = novoEstado ? tipo : '';
+    fontes.setAttribute('aria-busy', String(novoEstado));
+    controles.forEach((controle) => { controle.disabled = novoEstado; });
+    if (novoEstado && botao) {
+      botaoEmAndamento = botao;
+      conteudoOriginalBotao = botao.innerHTML;
+      botao.setAttribute('aria-busy', 'true');
+      botao.textContent = tipo === 'pasta'
+        ? 'Sincronizando pasta…'
+        : (tipo === 'arquivo' ? 'Selecionando e importando…' : 'Importando dados…');
+    } else if (botaoEmAndamento) {
+      botaoEmAndamento.innerHTML = conteudoOriginalBotao;
+      botaoEmAndamento.removeAttribute('aria-busy');
+      botaoEmAndamento = null;
+      conteudoOriginalBotao = '';
+      atualizarModoLink();
+    }
+  }
+
+  async function atualizarDadosDaTela(resultado) {
+    try {
+      const dados = await api.bootstrap();
+      if (dados && typeof dados === 'object') aplicarBootstrap(dados);
+    } catch {
+      // A importação foi persistida; o próximo bootstrap atualizará os indicadores.
+    }
+    renderizarStatusSincronizacao(resultado);
+  }
+
+  function renderizarResultadoTabela(resultado) {
+    const arquivo = nomeArquivoSeguro(resultado.arquivo) || 'Arquivo importado';
+    const tipoImportacao = String(resultado.tipoImportacao || resultado.tipo || '').toLowerCase();
+    const importaProdutos = tipoImportacao === 'produtos';
+    const metricas = importaProdutos
+      ? [
+        [numeroImportacao(resultado.processados ?? resultado.created ?? resultado.importados), 'listas processadas'],
+        [numeroImportacao(resultado.ignorados ?? resultado.invalidos), 'inalteradas'],
+        [numeroImportacao(resultado.erros), 'com erro'],
+        [numeroImportacao(resultado.totalProdutos ?? resultado.produtos), 'produtos disponíveis'],
+      ]
+      : [
+        [numeroImportacao(resultado.created), 'novos'],
+        [numeroImportacao(resultado.updated), 'atualizados'],
+        [numeroImportacao(resultado.totalLido), 'linhas lidas'],
+        [numeroImportacao(resultado.invalidos), 'ignoradas'],
+      ];
+    areaResultado.innerHTML = `
+      <div class="resultado-importacao__cartao resultado-importacao__cartao--sucesso">
+        <div class="resultado-importacao__titulo">${Icone.check}<div><strong>${importaProdutos ? 'Cadastro de produtos atualizado' : 'Base de clientes atualizada'}</strong><p>${escaparHtml(arquivo)} (${escaparHtml(resultado.formato || 'formato identificado')})</p></div></div>
+        <div class="resultado-importacao__metricas">${metricas.map(([valor, rotulo]) => `<div><strong>${valor.toLocaleString('pt-BR')}</strong><span>${escaparHtml(rotulo)}</span></div>`).join('')}</div>
+      </div>`;
+  }
+
+  function renderizarResultadoBackup(resultado, sincronizouPasta) {
+    const definicoes = [
+      ['Clientes', ['resumo.clientes', 'resumo.totalClientes', 'clientesImportados', 'totalClientes', 'clientes']],
+      ['Pedidos', ['resumo.pedidos', 'resumo.compras', 'pedidosImportados', 'totalPedidos', 'pedidos']],
+      ['Itens', ['resumo.itens', 'itensImportados', 'totalItens', 'itens']],
+      ['Pagamentos', ['resumo.pagamentos', 'pagamentosImportados', 'totalPagamentos', 'pagamentos']],
+      ['Produtos', ['resumo.produtos', 'produtosImportados', 'totalProdutos', 'produtos']],
+      ['Entregas', ['resumo.entregas', 'entregasImportadas', 'totalEntregas', 'entregas']],
+      ['Lançamentos no fiado', ['resumo.contaCorrente', 'contaCorrenteImportada', 'totalContaCorrente', 'contaCorrente']],
+      ['Perfis calculados', ['resumo.perfis', 'perfisCalculados', 'totalPerfis', 'perfis']],
+    ];
+    const metricas = definicoes
+      .map(([rotulo, caminhos]) => [rotulo, primeiraContagem(resultado, caminhos)])
+      .filter(([, quantidade]) => quantidade !== null);
+    const arquivo = nomeArquivoSeguro(resultado.arquivo || resultado.nomeArquivo) || 'Arquivo de dados importado';
+    const avisos = Array.isArray(resultado.avisos) ? resultado.avisos.filter(Boolean) : (resultado.aviso ? [resultado.aviso] : []);
+    const status = String(resultado.status || '').toLowerCase();
+    const duplicado = ['duplicada', 'duplicado', 'duplicate'].includes(status);
+    const atualizado = ['atualizada', 'up_to_date'].includes(status);
+    const anterior = ['anterior', 'older'].includes(status);
+    const titulo = atualizado
+      ? 'A pasta já está sincronizada com o backup mais recente'
+      : anterior
+        ? 'O arquivo é anterior ao backup já sincronizado'
+        : duplicado
+      ? 'O backup mais recente já estava importado'
+      : (sincronizouPasta ? 'Pasta sincronizada com sucesso' : 'Backup importado com sucesso');
+    areaResultado.innerHTML = `
+      <div class="resultado-importacao__cartao resultado-importacao__cartao--sucesso">
+        <div class="resultado-importacao__titulo">${Icone.check}<div><strong>${titulo}</strong><p>${escaparHtml(arquivo)}${duplicado || atualizado ? ' — nenhuma informação foi duplicada.' : anterior ? ' — os dados mais novos foram mantidos.' : ''}</p></div></div>
+        ${metricas.length ? `<div class="resultado-importacao__metricas">${metricas.map(([rotulo, quantidade]) => `<div><strong>${quantidade.toLocaleString('pt-BR')}</strong><span>${escaparHtml(rotulo)}</span></div>`).join('')}</div>` : '<p class="resultado-importacao__mensagem">Os dados disponíveis foram incorporados à base analítica local.</p>'}
+        ${avisos.length ? `<ul class="resultado-importacao__avisos">${avisos.map((aviso) => `<li>${escaparHtml(aviso)}</li>`).join('')}</ul>` : ''}
+      </div>`;
+  }
+
+  function renderizarFalha(mensagem) {
+    areaResultado.innerHTML = `
+      <div class="resultado-importacao__cartao resultado-importacao__cartao--erro" role="alert">
+        <div class="resultado-importacao__titulo">${Icone.aviso}<div><strong>Não foi possível concluir a importação</strong><p>${escaparHtml(mensagem)}</p></div></div>
+      </div>`;
+  }
+
+  async function executarImportacao({ tipo, botao, chamar }) {
+    if (ocupado) return;
+    limparErroLink();
+    areaResultado.innerHTML = '';
+    definirOcupado(true, tipo, botao);
+    let cancelarProgresso = () => {};
+    atualizarProgresso({
+      mensagem: tipo === 'pasta' ? 'Localizando o backup mais recente da pasta…' : 'Preparando o arquivo para importação…',
+    });
+    cancelarProgresso = api.onConsumerBackupProgress(atualizarProgresso);
+    try {
+      const resultado = await chamar();
+      if (resultado?.cancelado) {
+        areaAndamento.hidden = true;
+        return;
+      }
+      atualizarProgresso({ etapa: 'concluido', percentual: 100 });
+      await atualizarDadosDaTela(resultado);
+      const tipoImportacao = String(resultado?.tipoImportacao || resultado?.tipo || '').toLowerCase();
+      const importacaoTabular = ['clientes', 'produtos'].includes(tipoImportacao)
+        || (!tipoImportacao && Boolean(resultado?.formato));
+      const sincronizouPasta = resultado?.tipoFonte === 'drive-folder' || tipo === 'pasta';
+      if (importacaoTabular) renderizarResultadoTabela(resultado || {});
+      else renderizarResultadoBackup(resultado || {}, sincronizouPasta);
+      if (['url', 'pasta'].includes(tipo)) {
+        campoLink.value = '';
+        atualizarModoLink();
+      }
+      const statusResultado = String(resultado?.status || '').toLowerCase();
+      const duplicado = ['duplicada', 'duplicado', 'duplicate'].includes(statusResultado);
+      const atualizado = ['atualizada', 'up_to_date'].includes(statusResultado);
+      const anterior = ['anterior', 'older'].includes(statusResultado);
+      mostrarToast(
+        atualizado ? 'A pasta já está atualizada'
+          : anterior ? 'O backup mais novo foi mantido'
+          : duplicado ? 'O backup mais recente já estava na base'
+          : (importacaoTabular
+            ? (tipoImportacao === 'produtos' ? 'Cadastro de produtos atualizado' : 'Base de clientes atualizada')
+            : sincronizouPasta ? 'Pasta de backups sincronizada' : 'Histórico do Consumer importado'),
+        'sucesso',
+      );
+    } catch (error) {
+      areaAndamento.hidden = true;
+      const mensagem = motivoErroApi(error, 'Não foi possível importar o arquivo.');
+      renderizarFalha(mensagem);
+      mostrarToast(mensagem, 'erro');
+    } finally {
+      cancelarProgresso();
+      definirOcupado(false);
+    }
+  }
+
+  botaoArquivoLocal.addEventListener('click', () => executarImportacao({
+    tipo: 'arquivo',
+    botao: botaoArquivoLocal,
+    chamar: () => api.importDataFile(),
+  }));
+  formularioLink.addEventListener('submit', (evento) => {
+    evento.preventDefault();
+    const validacao = validarLinkBackupGoogleDrive(campoLink.value);
+    if (!validacao.valido) {
+      mostrarErroLink(validacao.erro);
+      return;
+    }
+    executarImportacao({
+      tipo: validacao.tipo === 'pasta' ? 'pasta' : 'url',
+      botao: botaoBackupLink,
+      chamar: () => api.importDataFromUrl(validacao.url),
+    });
+  });
+  campoLink.addEventListener('input', atualizarModoLink);
+  statusSincronizacao.addEventListener('click', async (evento) => {
+    const botaoRemover = evento.target instanceof Element
+      ? evento.target.closest('[data-remover-pasta-sync]')
+      : null;
+    if (!botaoRemover || ocupado || removendoPasta) return;
+    const confirmou = window.confirm(
+      'Remover a pasta sincronizada do Google Drive? A sincronização automática será desativada, mas nenhum cliente, produto, compra ou pagamento já importado será apagado.',
+    );
+    if (!confirmou) return;
+
+    removendoPasta = true;
+    botaoRemover.disabled = true;
+    botaoRemover.setAttribute('aria-busy', 'true');
+    botaoRemover.textContent = 'Removendo pasta…';
+    controles.forEach((controle) => { controle.disabled = true; });
+    try {
+      const resultado = await api.removeConsumerBackupFolder();
+      const sincronizacao = resultado?.sincronizacao && typeof resultado.sincronizacao === 'object'
+        ? resultado.sincronizacao
+        : {};
+      estado.consumer = { ...(estado.consumer || {}), sincronizacao };
+      campoLink.value = '';
+      atualizarModoLink();
+      renderizarStatusSincronizacao({ removida: true });
+      mostrarToast('Pasta removida. Os dados importados foram mantidos.', 'sucesso');
+    } catch (error) {
+      const mensagem = motivoErroApi(error, 'Não foi possível remover a pasta sincronizada.');
+      mostrarToast(mensagem, 'erro');
+      if (botaoRemover.isConnected) {
+        botaoRemover.disabled = false;
+        botaoRemover.removeAttribute('aria-busy');
+        botaoRemover.textContent = 'Remover pasta sincronizada';
+      }
+    } finally {
+      removendoPasta = false;
+      controles.forEach((controle) => { controle.disabled = false; });
+    }
+  });
+  let cancelarStatusSincronizacao = () => {};
+  cancelarStatusSincronizacao = api.onConsumerBackupSyncStatus((sync) => {
+    if (!tela.isConnected) {
+      cancelarStatusSincronizacao();
+      return;
+    }
+    estado.consumer = { ...(estado.consumer || {}), sincronizacao: sync };
+    renderizarStatusSincronizacao();
+  });
+  api.getConsumerBackupSyncStatus().then((sync) => {
+    if (!tela.isConnected || !sync || typeof sync !== 'object') return;
+    estado.consumer = { ...(estado.consumer || {}), sincronizacao: sync };
+    atualizarModoLink();
+    renderizarStatusSincronizacao();
+  }).catch(() => undefined);
+  atualizarModoLink();
+  renderizarStatusSincronizacao();
+}
+
 function provedorIaValido(valor) {
   return Object.hasOwn(PROVEDORES_IA, valor) ? valor : 'gemini';
 }
@@ -53,7 +481,49 @@ export function montarConfiguracoes(alvo) {
   )).join('');
   const tela = paraElemento(`
     <div>
-      <div class="topo-pagina"><div><h1>Configurações</h1><p class="legenda">Preferências seguras para pagamentos e próximos disparos.</p></div></div>
+      <div class="topo-pagina"><div><h1>Configurações</h1><p class="legenda">Preferências, integrações e fontes de dados do aplicativo.</p></div></div>
+      <section class="cartao secao-config secao-fontes-dados" aria-labelledby="titulo-fontes-dados">
+        <div class="secao-config__cabecalho secao-fontes-dados__cabecalho">
+          <div>
+            <h2 id="titulo-fontes-dados"><span aria-hidden="true">${Icone.atualizar}</span> Fontes de dados</h2>
+            <p class="legenda">Atualize cadastros e o histórico completo usado nos perfis de clientes e nas análises da IA.</p>
+          </div>
+          <div class="status-fonte-dados" id="status-sincronizacao-consumer" aria-live="polite"></div>
+        </div>
+        <div class="importacao-fontes" id="fontes-importacao">
+          <article class="importacao-fonte importacao-fonte--destaque" aria-labelledby="titulo-importar-dados">
+            <div class="importacao-fonte__cabecalho">
+              <span class="importacao-fonte__icone" aria-hidden="true">${Icone.atualizar}</span>
+              <div>
+                <span class="badge badge--sucesso">Importação centralizada</span>
+                <h4 id="titulo-importar-dados">Importar dados</h4>
+                <p>O aplicativo reconhece o formato escolhido e atualiza clientes, produtos ou o histórico completo do Consumer.</p>
+              </div>
+            </div>
+            <button class="btn btn--secundario importacao-fonte__acao" type="button" data-arquivo-local>${Icone.upload} Selecionar arquivo local</button>
+            <p class="ajuda-campo">Formatos aceitos: FB, FBCONSUMER, FBK, GBK, BAK, BACKUP, PDF, XLS, XLSX e CSV.</p>
+            <div class="importacao-separador" aria-hidden="true"><span>ou conectar ao Drive</span></div>
+            <form id="form-backup-drive" novalidate>
+              <div class="importacao-link-rotulo">
+                <label for="campo-link-backup">Link do arquivo ou da pasta no Google Drive</label>
+                <span class="badge badge--sucesso">Pasta recomendada</span>
+              </div>
+              <div class="importacao-link-linha">
+                <input id="campo-link-backup" name="backupUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Cole aqui o link compartilhado" aria-describedby="ajuda-link-backup erro-link-backup">
+                <button class="btn btn--primario" type="submit" data-backup-link>Importar arquivo</button>
+              </div>
+              <p class="ajuda-campo" id="ajuda-link-backup">Aceita arquivo específico em formato compatível ou uma pasta de backups. Prefira a pasta para manter os perfis atualizados.</p>
+              <p class="erro-campo" id="erro-link-backup" role="alert" hidden></p>
+            </form>
+          </article>
+        </div>
+        <div class="importacao-andamento" id="andamento-importacao" aria-live="polite" aria-atomic="true" hidden>
+          <div class="importacao-andamento__texto"><strong id="texto-andamento">Preparando importação…</strong><span id="percentual-andamento"></span></div>
+          <div class="importacao-barra" id="barra-importacao" role="progressbar" aria-label="Progresso da importação"><i></i></div>
+          <p>Não feche o aplicativo enquanto os dados estão sendo processados.</p>
+        </div>
+        <div id="resultado-importacao" class="resultado-importacao" role="status" aria-live="polite" aria-atomic="true"></div>
+      </section>
       <section class="cartao secao-config secao-config--ia" aria-labelledby="titulo-config-ia">
         <div class="secao-config-ia__topo">
           <div class="secao-config__cabecalho">
@@ -107,6 +577,7 @@ export function montarConfiguracoes(alvo) {
       </div>
     </div>`);
   alvo.appendChild(tela);
+  montarFontesDados(tela);
   const campoPixFavorecido = tela.querySelector('#campo-pix-favorecido');
   const campoPixTipo = tela.querySelector('#campo-pix-tipo');
   const campoPixChave = tela.querySelector('#campo-pix-chave');
@@ -444,7 +915,7 @@ export function montarConfiguracoes(alvo) {
 function abrirEditorTemplate(aoSalvar, templateExistente) {
   const { elemento, fechar } = abrirModal({
     titulo: templateExistente ? 'Editar template' : 'Novo template',
-    corpoHtml: `<div class="campo"><label for="nome-tpl">Nome</label><input type="text" id="nome-tpl" value="${escaparHtml(templateExistente?.nome)}"></div><div class="campo"><label for="texto-tpl">Mensagem</label><textarea id="texto-tpl" rows="9" aria-describedby="ajuda-placeholders-tpl">${escaparHtml(templateExistente?.texto)}</textarea><small id="ajuda-placeholders-tpl">Dados PIX disponíveis: {{pix_nome_favorecido}}, {{pix_chave}} e {{pix_tipo}}. Eles são preenchidos apenas no envio.</small></div>`,
+    corpoHtml: `<div class="campo"><label for="nome-tpl">Nome</label><input type="text" id="nome-tpl" value="${escaparHtml(templateExistente?.nome)}"></div><div class="campo"><label for="texto-tpl">Mensagem</label><textarea id="texto-tpl" rows="9" aria-describedby="ajuda-placeholders-tpl">${escaparHtml(templateExistente?.texto)}</textarea><small id="ajuda-placeholders-tpl">Dados PIX disponíveis: {{pix_nome_favorecido}}, {{pix_chave}} e {{pix_tipo}}. Somente os placeholders são substituídos; nenhum aviso ou rodapé é acrescentado.</small></div>`,
     rodapeHtml: '<button class="btn btn--secundario" data-cancelar>Cancelar</button><button class="btn btn--primario" data-salvar>Salvar</button>',
   });
   elemento.querySelector('[data-cancelar]').addEventListener('click', fechar);

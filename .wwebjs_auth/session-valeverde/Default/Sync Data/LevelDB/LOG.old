@@ -1,4 +1,0 @@
-2026/08/07-14:34:26.259 2008 Creating DB C:\Users\Lenovo\Documents\botcobra\ValeVerdeBot\.wwebjs_auth\session-valeverde\Default\Sync Data\LevelDB since it was missing.
-2026/08/07-14:34:26.296 2008 Reusing MANIFEST C:\Users\Lenovo\Documents\botcobra\ValeVerdeBot\.wwebjs_auth\session-valeverde\Default\Sync Data\LevelDB/MANIFEST-000001
-2026/08/07-14:34:26.296 2008 Recovering log #3
-2026/08/07-14:34:26.296 2008 Reusing old log C:\Users\Lenovo\Documents\botcobra\ValeVerdeBot\.wwebjs_auth\session-valeverde\Default\Sync Data\LevelDB/000003.log 

@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const SNAPSHOT_SCHEMA_VERSION = 1;
+const SUPPORTED_BACKUP_EXTENSIONS = new Set(['.fbconsumer', '.fb', '.fbk', '.gbk', '.bak', '.backup']);
 const DEFAULT_MAX_OUTPUT_BYTES = 128 * 1024 * 1024;
 const DEFAULT_RESTORE_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_QUERY_TIMEOUT_MS = 5 * 60 * 1000;
@@ -527,8 +528,8 @@ async function validateBackupFile(backupPath, options = {}) {
         });
     }
     const resolved = path.resolve(backupPath);
-    if (path.extname(resolved).toLowerCase() !== '.fbconsumer') {
-        throw new ConsumerBackupError('INVALID_BACKUP_EXTENSION', 'O arquivo precisa ter a extensão .fbconsumer.', {
+    if (!SUPPORTED_BACKUP_EXTENSIONS.has(path.extname(resolved).toLowerCase())) {
+        throw new ConsumerBackupError('INVALID_BACKUP_EXTENSION', 'O arquivo precisa ser um backup FB, FBCONSUMER, FBK, GBK, BAK ou BACKUP.', {
             stage: 'validation',
         });
     }
@@ -740,7 +741,7 @@ function notifyProgress(listener, stage, message, current, total) {
 }
 
 /**
- * Restores a .fbconsumer backup to an isolated read-only Firebird database,
+ * Restores a .fbconsumer/.fb backup to an isolated read-only Firebird database,
  * extracts the supported entities, and removes the restored database.
  */
 async function extractConsumerBackup(backupPath, options = {}) {
@@ -755,22 +756,42 @@ async function extractConsumerBackup(backupPath, options = {}) {
     const databaseTarget = `${options.host || 'localhost'}:${databasePath}`;
     let primaryError = null;
     let snapshot;
+    let sourceFormat = 'consumer-firebird-backup';
 
     notifyProgress(options.onProgress, 'restore', 'Restaurando uma cópia temporária e somente leitura...', 0, ENTITY_DEFINITIONS.length + 1);
     try {
-        await invokeProcess(exec, tools.gbak, [
-            '-create_database',
-            '-mode',
-            'read_only',
-            backup.path,
-            databaseTarget,
-        ], {
-            env: processEnv,
-            signal: options.signal,
-            timeoutMs: options.restoreTimeoutMs || DEFAULT_RESTORE_TIMEOUT_MS,
-            maxOutputBytes: options.maxOutputBytes || DEFAULT_MAX_OUTPUT_BYTES,
-            stage: 'restore',
-        });
+        try {
+            await invokeProcess(exec, tools.gbak, [
+                '-create_database',
+                '-mode',
+                'read_only',
+                backup.path,
+                databaseTarget,
+            ], {
+                env: processEnv,
+                signal: options.signal,
+                timeoutMs: options.restoreTimeoutMs || DEFAULT_RESTORE_TIMEOUT_MS,
+                maxOutputBytes: options.maxOutputBytes || DEFAULT_MAX_OUTPUT_BYTES,
+                stage: 'restore',
+            });
+        } catch (restoreError) {
+            if (path.extname(backup.path).toLowerCase() !== '.fb' || options.allowRawDatabase === false) {
+                throw restoreError;
+            }
+            notifyProgress(options.onProgress, 'restore', 'Criando uma cópia isolada do banco Firebird...', 0, ENTITY_DEFINITIONS.length + 1);
+            try {
+                await fsPromises.copyFile(backup.path, databasePath);
+            } catch (copyError) {
+                const failure = new ConsumerBackupError(
+                    'DATABASE_COPY_FAILED',
+                    'Não foi possível criar uma cópia isolada do arquivo .fb.',
+                    { stage: 'restore', cause: copyError },
+                );
+                failure.restoreError = restoreError;
+                throw failure;
+            }
+            sourceFormat = 'consumer-firebird-database-copy';
+        }
 
         const entities = {};
         for (let index = 0; index < ENTITY_DEFINITIONS.length; index += 1) {
@@ -808,7 +829,7 @@ async function extractConsumerBackup(backupPath, options = {}) {
         snapshot = {
             schemaVersion: SNAPSHOT_SCHEMA_VERSION,
             source: {
-                format: 'consumer-firebird',
+                format: sourceFormat,
                 fileName: path.basename(backup.path),
                 sizeBytes: backup.size,
             },

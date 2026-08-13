@@ -80,7 +80,6 @@ test('renderiza o QR recebido por IPC sem iniciar uma sessao real', async ({}, t
             VALEVERDE_REPORTS_DIR: sandbox.reports,
             VALEVERDE_TEMPLATES_DIR: sandbox.templates,
             VALEVERDE_AUTH_DIR: sandbox.auth,
-            VALEVERDE_LISTS_DIR: sandbox.lists,
         },
     });
 

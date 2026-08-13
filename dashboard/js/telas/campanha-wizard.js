@@ -136,6 +136,7 @@ export function montarNovaCampanha(alvo) {
             <label for="texto-mensagem">Mensagem</label>
             <div class="placeholders">${PLACEHOLDERS.map((placeholder) => `<button class="chip-placeholder" type="button" data-placeholder="${placeholder}">${placeholder}</button>`).join('')}</div>
             <textarea id="texto-mensagem" rows="8" placeholder="Escreva a mensagem que será enviada" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">${escaparHtml(rascunho.mensagem)}</textarea>
+            <small>O WhatsApp receberá somente este texto, com os placeholders substituídos. O sistema não adiciona avisos nem rodapés.</small>
           </div>
           <div>
             <label>Prévia com dados reais</label>
@@ -279,7 +280,11 @@ export function montarNovaCampanha(alvo) {
       botaoTeste.disabled = true;
       botaoTeste.textContent = 'Enviando teste...';
       try {
-        const resultado = await api.sendTest({ telefone, mensagem: rascunho.mensagem });
+        const resultado = await api.sendTest({
+          telefone,
+          mensagem: rascunho.mensagem,
+          clienteExemploId: exemplo?.id,
+        });
         rascunho.telefoneTeste = telefone;
         rascunho.testeEnviado = true;
         rascunho.testeId = resultado.testeId;

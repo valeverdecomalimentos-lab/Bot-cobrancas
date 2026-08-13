@@ -8,24 +8,17 @@ const report = require('./core/report');
 const database = require('./core/database');
 const config = require('./config');
 
-function encontrarTabelaPadrao() {
-    const directory = path.join(__dirname, 'listas');
-    if (!fs.existsSync(directory)) return null;
-    const files = fs.readdirSync(directory)
-        .filter((name) => /\.(xls|xlsx|csv|pdf)$/i.test(name))
-        .sort((a, b) => b.localeCompare(a));
-    return files[0] ? path.join(directory, files[0]) : null;
-}
-
 const state = {
     clientes: database.listCustomers(),
-    arquivoAtual: encontrarTabelaPadrao(),
+    arquivoAtual: null,
     relatorioStatus: [],
 };
 
 async function carregarTabela(filePath) {
     const parsed = await importer.parseImportFile(filePath);
-    const result = database.importCustomers(parsed.rows, parsed.arquivo);
+    const result = parsed.tipo === 'produtos'
+        ? database.importProducts(parsed.rows, parsed.arquivo)
+        : database.importCustomers(parsed.rows, parsed.arquivo);
     state.clientes = database.listCustomers();
     state.arquivoAtual = filePath;
     return { parsed, result };
@@ -59,7 +52,7 @@ async function tratarOpcao(opcao) {
     if (opcao.trim() === '1') {
         rl.question('Digite o caminho ou o nome do arquivo: ', async (nome) => {
             const informado = nome.trim();
-            const candidate = informado ? (fs.existsSync(informado) ? informado : path.join(__dirname, 'listas', informado)) : state.arquivoAtual;
+            const candidate = informado ? path.resolve(informado) : null;
             try {
                 if (!candidate || !fs.existsSync(candidate)) throw new Error('Arquivo nao encontrado.');
                 const { parsed, result } = await carregarTabela(candidate);
@@ -126,15 +119,6 @@ const rl = readline.createInterface({ input: process.stdin, output: process.stdo
 console.log('Iniciando WhatsApp. Aguarde o QR Code.');
 whatsapp.iniciar().catch((error) => console.log(`Falha ao iniciar WhatsApp: ${error.message}`));
 
-if (state.arquivoAtual && fs.existsSync(state.arquivoAtual)) {
-    carregarTabela(state.arquivoAtual)
-        .then(() => mostrarMenu())
-        .catch((error) => {
-            console.log(`Tabela inicial nao carregada: ${error.message}`);
-            mostrarMenu();
-        });
-} else {
-    mostrarMenu();
-}
+mostrarMenu();
 
 whatsapp.onReady(mostrarMenu);

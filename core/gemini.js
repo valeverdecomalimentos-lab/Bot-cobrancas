@@ -246,6 +246,10 @@ function normalizeDatasets(customers, products, imports, reports, options = {}) 
         reports: Array.isArray(reports) ? reports : [],
         spreadsheets: Array.isArray(options.spreadsheets) ? options.spreadsheets : [],
         runtime: options.runtime && typeof options.runtime === 'object' ? options.runtime : {},
+        consumerAnalytics: options.consumerAnalytics && typeof options.consumerAnalytics === 'object'
+            ? options.consumerAnalytics
+            : {},
+        consumerProfiles: Array.isArray(options.consumerProfiles) ? options.consumerProfiles : [],
     };
 }
 

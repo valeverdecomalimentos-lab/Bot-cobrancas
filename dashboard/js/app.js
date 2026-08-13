@@ -272,5 +272,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     barramento.emit('whatsapp:status', status);
     if (nomeRotaAtual() !== 'login') atualizarIndicadoresConexao();
   });
+  let atualizandoDadosConsumer = false;
+  api.onConsumerBackupDataUpdated(async () => {
+    if (atualizandoDadosConsumer) return;
+    atualizandoDadosConsumer = true;
+    try {
+      aplicarBootstrap(await api.bootstrap());
+      const rotaAtual = nomeRotaAtual();
+      if (rotaAtual && rotaAtual !== 'login') resolverRota(rotaAtual);
+    } catch {
+      // A sincronização já foi persistida; uma navegação futura recarrega os dados.
+    } finally {
+      atualizandoDadosConsumer = false;
+    }
+  });
   iniciarRoteador(resolverRota);
 });

@@ -27,7 +27,7 @@ function extractGoogleDriveFileId(input) {
     }
 
     const host = url.hostname.toLowerCase().replace(/^www\./, '');
-    if (url.protocol !== 'https:' || !['drive.google.com', 'docs.google.com'].includes(host)) {
+    if (url.protocol !== 'https:' || host !== 'drive.google.com') {
         throw new DownloadError('Use um link HTTPS compartilhado pelo Google Drive.', 'DRIVE_URL_INVALID');
     }
     if (/\/folders\//i.test(url.pathname)) {
@@ -68,6 +68,12 @@ function responseFileName(response) {
         value = '';
     }
     return path.basename(String(value).trim().replace(/[\u0000-\u001f]/g, '')).slice(0, 240);
+}
+
+function responseModifiedAt(response) {
+    const value = String(response?.headers?.get?.('last-modified') || '').trim();
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
 async function downloadGoogleDriveBackup(input, destinationPath, options = {}) {
@@ -112,7 +118,13 @@ async function downloadGoogleDriveBackup(input, destinationPath, options = {}) {
         });
         await pipeline(Readable.fromWeb(response.body), counter, fs.createWriteStream(destinationPath, { flags: 'wx', mode: 0o600 }));
         if (!received) throw new DownloadError('O arquivo baixado esta vazio.', 'BACKUP_EMPTY');
-        return { fileId, filePath: destinationPath, sizeBytes: received, fileName: responseFileName(response) };
+        return {
+            fileId,
+            filePath: destinationPath,
+            sizeBytes: received,
+            fileName: responseFileName(response),
+            modifiedAt: responseModifiedAt(response),
+        };
     } catch (error) {
         safeUnlink(destinationPath);
         if (error instanceof DownloadError) throw error;
@@ -129,5 +141,6 @@ module.exports = {
     extractGoogleDriveFileId,
     buildDownloadUrl,
     responseFileName,
+    responseModifiedAt,
     downloadGoogleDriveBackup,
 };

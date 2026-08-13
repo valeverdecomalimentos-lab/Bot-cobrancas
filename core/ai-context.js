@@ -47,6 +47,7 @@ function classifyIntent(question = '', operation = 'question') {
         campaigns: all || /campanh|envio|whatsapp|mensagem|disparo|sucesso|erro/.test(text),
         imports: all || /import|planilh|arquivo|sincron|qualidade|coluna|csv|xlsx|pdf/.test(text),
         operational: /envi|mand|dispar|agend|program|prepar|notific|lembret/.test(text),
+        purchaseHistory: all || /histor|frequenc|recorr|habito|padrao|dia|hora|seman|compr|pedido|item|pagament|parcial|produto/.test(text),
     };
     if (!Object.values(intent).some(Boolean)) intent.all = true;
     if (intent.finance) intent.customers = true;
@@ -65,9 +66,16 @@ function createBusinessSignature(datasets = {}) {
     const reports = Array.isArray(datasets.reports) ? datasets.reports : [];
     const spreadsheets = Array.isArray(datasets.spreadsheets) ? datasets.spreadsheets : [];
     const runtime = datasets.runtime && typeof datasets.runtime === 'object' ? datasets.runtime : {};
+    const consumerProfiles = Array.isArray(datasets.consumerProfiles) ? datasets.consumerProfiles : [];
+    const consumerAnalytics = datasets.consumerAnalytics && typeof datasets.consumerAnalytics === 'object'
+        ? datasets.consumerAnalytics
+        : {};
     const hash = crypto.createHash('sha256');
-    hash.update(`v3|${customers.length}|${products.length}|${imports.length}|${reports.length}|${spreadsheets.length}|`);
-    customers.forEach((record) => hashRecord(hash, 'c', record, ['id', 'nome', 'telefone', 'saldo_devedor', 'valorDevido', 'status', 'ultimaCompra', 'atualizadoEm']));
+    hash.update(`v5|${customers.length}|${products.length}|${imports.length}|${reports.length}|${spreadsheets.length}|${consumerProfiles.length}|`);
+    customers.forEach((record) => {
+        hashRecord(hash, 'c', record, ['id', 'nome', 'telefone', 'saldo_devedor', 'valorDevido', 'status', 'ultimaCompra', 'atualizadoEm']);
+        hash.update(`${createSignature(record?.perfilConsumer || {})}\u001c`);
+    });
     products.forEach((record) => hashRecord(hash, 'p', record, ['id', 'codigo', 'nome', 'categoria', 'precoCusto', 'precoVenda', 'estoque', 'estoqueMinimo', 'situacaoEstoque', 'atualizadoEm']));
     imports.forEach((record) => hashRecord(hash, 'i', record, ['id', 'data', 'arquivo', 'assinatura', 'status', 'totalLido', 'created', 'updated', 'ignored', 'erro']));
     reports.forEach((record) => hashRecord(hash, 'r', record, ['id', 'data', 'tipo', 'total', 'enviados', 'erros', 'ignorados', 'mensagem']));
@@ -76,6 +84,8 @@ function createBusinessSignature(datasets = {}) {
         (Array.isArray(source.rows) ? source.rows : []).forEach((row) => hash.update(`${createSignature(row)}\u001d`));
     });
     hash.update(`runtime\u001f${createSignature(runtimeSummary(runtime))}`);
+    hash.update(`consumer\u001f${createSignature(consumerAnalytics)}`);
+    consumerProfiles.forEach((profile) => hash.update(`history\u001f${createSignature(profile)}\u001c`));
     return hash.digest('hex');
 }
 
@@ -228,6 +238,12 @@ function uniqueRecords(records, identity = (record) => record.id || JSON.stringi
 }
 
 function safeCustomer(customer) {
+    const consumer = customer.perfilConsumer && typeof customer.perfilConsumer === 'object'
+        ? customer.perfilConsumer
+        : null;
+    const favoriteProducts = Array.isArray(consumer?.favoriteProducts) ? consumer.favoriteProducts : [];
+    const favoriteCategories = Array.isArray(consumer?.favoriteCategories) ? consumer.favoriteCategories : [];
+    const paymentMethods = Array.isArray(consumer?.paymentMethods) ? consumer.paymentMethods : [];
     return {
         id: trimText(customer.id, 120),
         nome: trimText(customer.nome, 180),
@@ -240,6 +256,232 @@ function safeCustomer(customer) {
             rotulo: trimText(customer.perfilAnalitico.rotulo, 120),
             elegivelCobranca: Boolean(customer.perfilAnalitico.elegivelCobranca),
         } : undefined,
+        historicoConsumer: consumer ? {
+            quantidadeCompras: finite(consumer.orderCount),
+            valorTotalComprado: Number((finite(consumer.totalPurchasedCents) / 100).toFixed(2)),
+            ticketMedio: Number((finite(consumer.averageTicketCents) / 100).toFixed(2)),
+            primeiraCompra: trimText(consumer.firstPurchaseAt, 80) || null,
+            ultimaCompra: trimText(consumer.lastPurchaseAt, 80) || null,
+            mediaDiasEntreCompras: hasNumericValue(consumer.averageDaysBetweenPurchases)
+                ? finite(consumer.averageDaysBetweenPurchases)
+                : null,
+            quantidadePagamentos: finite(consumer.paymentCount),
+            valorTotalPago: Number((finite(consumer.paidTotalCents) / 100).toFixed(2)),
+            ultimoPagamento: trimText(consumer.lastPaymentAt, 80) || null,
+            mediaDiasEntrePagamentos: hasNumericValue(consumer.averageDaysBetweenPayments)
+                ? finite(consumer.averageDaysBetweenPayments)
+                : null,
+            pagamentosDeFiado: finite(consumer.debtPaymentCount),
+            valorPagoNoFiado: Number((finite(consumer.debtPaidTotalCents) / 100).toFixed(2)),
+            ultimoPagamentoDeFiado: trimText(consumer.lastDebtPaymentAt, 80) || null,
+            mediaDiasEntrePagamentosDeFiado: hasNumericValue(consumer.averageDaysBetweenDebtPayments)
+                ? finite(consumer.averageDaysBetweenDebtPayments)
+                : null,
+            saldoEmAberto: Number((finite(consumer.currentDebtCents) / 100).toFixed(2)),
+            produtosDistintos: finite(consumer.distinctProducts),
+            categoriasDistintas: finite(consumer.distinctCategories),
+            formaPagamentoPreferida: trimText(paymentMethods[0]?.method, 100) || null,
+            categoriaPreferida: trimText(favoriteCategories[0]?.category, 100) || null,
+            canalMaisFrequenteEntreIdentificados: trimText(consumer.preferredFulfillment, 40) || 'unknown',
+            produtosFavoritos: favoriteProducts.slice(0, 3).map((product) => ({
+                nome: trimText(product.name, 160),
+                categoria: trimText(product.category, 100),
+                quantidade: Number((finite(product.quantityMilli) / 1000).toFixed(3)),
+                valor: Number((finite(product.totalCents) / 100).toFixed(2)),
+            })),
+        } : undefined,
+    };
+}
+
+function safeConsumerAnalytics(value = {}) {
+    if (!value || typeof value !== 'object' || !finite(value.imports)) return null;
+    return {
+        backupsImportados: finite(value.imports),
+        clientes: finite(value.customers),
+        clientesAtivos: finite(value.activeCustomers),
+        produtos: finite(value.products),
+        pedidosValidos: finite(value.orders),
+        itensValidos: finite(value.orderItems),
+        pagamentosValidos: finite(value.payments),
+        lancamentosContaCorrente: finite(value.ledgerEntries),
+        entregasOuRetiradasExplicitas: finite(value.deliveries),
+        faturamentoHistorico: Number((finite(value.revenueCents) / 100).toFixed(2)),
+        ticketMedio: Number((finite(value.averageTicketCents) / 100).toFixed(2)),
+        valorPago: Number((finite(value.paidTotalCents) / 100).toFixed(2)),
+        cobrancasLancadasNoFiado: finite(value.ledgerChargeCount),
+        valorLancadoNoFiado: Number((finite(value.ledgerChargeTotalCents) / 100).toFixed(2)),
+        pagamentosRegistradosNoFiado: finite(value.debtPaymentCount),
+        valorPagoNoFiado: Number((finite(value.debtPaidTotalCents) / 100).toFixed(2)),
+        ultimoPagamentoNoFiado: trimText(value.lastDebtPaymentAt, 80) || null,
+        saldoEmAberto: Number((finite(value.outstandingDebtCents) / 100).toFixed(2)),
+        clientesComSaldoEmAberto: finite(value.customersWithDebt),
+        primeiraCompra: trimText(value.firstOrderAt, 80) || null,
+        ultimaCompra: trimText(value.lastOrderAt, 80) || null,
+        ultimoPagamento: trimText(value.lastPaymentAt, 80) || null,
+        canaisExplicitos: {
+            entrega: finite(value.fulfillment?.delivery),
+            retirada: finite(value.fulfillment?.pickup),
+            outros: finite(value.fulfillment?.other),
+        },
+        formasPagamentoPrincipais: (Array.isArray(value.topPaymentMethods) ? value.topPaymentMethods : []).slice(0, 10).map((item) => ({
+            forma: trimText(item.method, 100),
+            quantidade: finite(item.count),
+            valor: Number((finite(item.totalCents) / 100).toFixed(2)),
+        })),
+        categoriasPrincipais: (Array.isArray(value.topCategories) ? value.topCategories : []).slice(0, 10).map((item) => ({
+            categoria: trimText(item.category, 120),
+            itens: finite(item.itemCount),
+            quantidade: Number((finite(item.quantityMilli) / 1000).toFixed(3)),
+            valor: Number((finite(item.totalCents) / 100).toFixed(2)),
+        })),
+        limitacoes: [
+            'O backup atual não fornece vencimentos; saldo em aberto não implica atraso.',
+            'Canal de compra só é classificado quando há evidência explícita.',
+        ],
+    };
+}
+
+const WEEKDAY_NAMES = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+
+function localOrderParts(value) {
+    const source = trimText(value, 80);
+    const match = source.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})/);
+    if (!match) return { weekday: 'nao_informado', hour: null };
+    const date = new Date(`${match[1]}T12:00:00Z`);
+    return {
+        weekday: Number.isFinite(date.getTime()) ? WEEKDAY_NAMES[date.getUTCDay()] : 'nao_informado',
+        hour: Number(match[2]),
+    };
+}
+
+function rankedMap(map, limit, label) {
+    return [...map.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'pt-BR'))
+        .slice(0, limit)
+        .map(([name, count]) => ({ [label]: name, compras: count }));
+}
+
+function profileBehavior(profile = {}) {
+    const orders = (Array.isArray(profile.ordersHistory) ? profile.ordersHistory : []).filter((order) => !order.cancelled);
+    const weekdays = new Map();
+    const hours = new Map();
+    const productWeekdays = new Map();
+    for (const order of orders) {
+        const parts = localOrderParts(order.orderedAt);
+        weekdays.set(parts.weekday, (weekdays.get(parts.weekday) || 0) + 1);
+        if (parts.hour !== null) {
+            const label = `${String(parts.hour).padStart(2, '0')}:00-${String((parts.hour + 1) % 24).padStart(2, '0')}:00`;
+            hours.set(label, (hours.get(label) || 0) + 1);
+        }
+        for (const item of Array.isArray(order.items) ? order.items : []) {
+            if (item.cancelled) continue;
+            const product = trimText(item.productName, 140) || 'Produto sem nome';
+            const key = `${product}\u001f${parts.weekday}`;
+            productWeekdays.set(key, (productWeekdays.get(key) || 0) + 1);
+        }
+    }
+    const favoriteProductDays = [...productWeekdays.entries()]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'pt-BR'))
+        .slice(0, 8)
+        .map(([key, purchases]) => {
+            const [product, weekday] = key.split('\u001f');
+            return { produto: product, diaDaSemana: weekday, compras: purchases };
+        });
+    return {
+        cliente: trimText(profile.name, 180) || 'Cliente sem nome',
+        ativo: profile.active !== false,
+        compras: finite(profile.orderCount ?? orders.length),
+        gastoTotal: Number((finite(profile.totalPurchasedCents) / 100).toFixed(2)),
+        ticketMedio: Number((finite(profile.averageTicketCents) / 100).toFixed(2)),
+        mediaDiasEntreCompras: hasNumericValue(profile.averageDaysBetweenPurchases)
+            ? finite(profile.averageDaysBetweenPurchases)
+            : null,
+        saldoEmAberto: Number((finite(profile.currentDebtCents) / 100).toFixed(2)),
+        pedidosComPagamentoParcial: finite(profile.partialPaymentOrderCount),
+        diasMaisFrequentes: rankedMap(weekdays, 3, 'diaDaSemana'),
+        horariosMaisFrequentes: rankedMap(hours, 3, 'faixaHoraria'),
+        produtosPorDiaMaisRecorrentes: favoriteProductDays,
+    };
+}
+
+function consumerBehaviorSummary(profiles = []) {
+    const activeProfiles = profiles.filter((profile) => profile.active !== false);
+    const weekdays = new Map();
+    const hours = new Map();
+    const productWeekdays = new Map();
+    let orders = 0;
+    let partialOrders = 0;
+    for (const profile of activeProfiles) {
+        for (const order of Array.isArray(profile.ordersHistory) ? profile.ordersHistory : []) {
+            if (order.cancelled) continue;
+            orders += 1;
+            if (order.partialPayment) partialOrders += 1;
+            const parts = localOrderParts(order.orderedAt);
+            weekdays.set(parts.weekday, (weekdays.get(parts.weekday) || 0) + 1);
+            if (parts.hour !== null) hours.set(String(parts.hour).padStart(2, '0'), (hours.get(String(parts.hour).padStart(2, '0')) || 0) + 1);
+            for (const item of Array.isArray(order.items) ? order.items : []) {
+                if (item.cancelled) continue;
+                const product = trimText(item.productName, 140) || 'Produto sem nome';
+                const key = `${product}\u001f${parts.weekday}`;
+                productWeekdays.set(key, (productWeekdays.get(key) || 0) + 1);
+            }
+        }
+    }
+    return {
+        perfisAnalisados: profiles.length,
+        perfisAtivos: activeProfiles.length,
+        perfisInativos: profiles.length - activeProfiles.length,
+        comprasAnalisadas: orders,
+        pedidosComPagamentoParcial: partialOrders,
+        diasMaisMovimentados: rankedMap(weekdays, 7, 'diaDaSemana'),
+        horasMaisMovimentadas: rankedMap(hours, 12, 'horaLocal'),
+        combinacoesProdutoDia: [...productWeekdays.entries()]
+            .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'pt-BR'))
+            .slice(0, 30)
+            .map(([key, purchases]) => {
+                const [product, weekday] = key.split('\u001f');
+                return { produto: product, diaDaSemana: weekday, compras: purchases };
+            }),
+        observacao: 'Padrões calculados localmente usando apenas pedidos não cancelados e horário local do Consumer.',
+    };
+}
+
+function safeDetailedConsumerProfile(profile = {}) {
+    const safeOrder = (order) => ({
+        dataHora: trimText(order.orderedAt, 80) || null,
+        origem: trimText(order.origin, 100) || null,
+        situacao: trimText(order.status, 80) || null,
+        total: Number((finite(order.totalCents) / 100).toFixed(2)),
+        situacaoPagamentoRegistrado: trimText(order.paymentStatus, 40) || 'nao_informado',
+        pagamentoParcial: Boolean(order.partialPayment),
+        valorPagoVinculado: Number((finite(order.recordedPaidTotalCents) / 100).toFixed(2)),
+        valorRestanteNessePedido: Number((finite(order.recordedRemainingCents) / 100).toFixed(2)),
+        itens: (Array.isArray(order.items) ? order.items : []).filter((item) => !item.cancelled).slice(0, 30).map((item) => ({
+            produto: trimText(item.productName, 160) || 'Produto sem nome',
+            categoria: trimText(item.category, 100) || null,
+            quantidade: Number((finite(item.quantityMilli) / 1000).toFixed(3)),
+            valorUnitario: Number((finite(item.unitPriceCents) / 100).toFixed(2)),
+            valorTotal: Number((finite(item.totalCents) / 100).toFixed(2)),
+        })),
+    });
+    return {
+        cliente: trimText(profile.name, 180) || 'Cliente sem nome',
+        ativo: profile.active !== false,
+        resumo: profileBehavior(profile),
+        compras: (Array.isArray(profile.ordersHistory) ? profile.ordersHistory : []).filter((order) => !order.cancelled).slice(0, 80).map(safeOrder),
+        pagamentos: (Array.isArray(profile.paymentsHistory) ? profile.paymentsHistory : []).filter((payment) => !payment.cancelled).slice(0, 100).map((payment) => ({
+            dataHora: trimText(payment.paidAt, 80) || null,
+            forma: trimText(payment.method, 100) || 'nao_informada',
+            valor: Number((finite(payment.amountCents) / 100).toFixed(2)),
+            vinculadoAPedido: Boolean(payment.orderExternalId),
+        })),
+        contaCorrente: (Array.isArray(profile.ledgerHistory) ? profile.ledgerHistory : []).filter((entry) => !entry.cancelled).slice(0, 100).map((entry) => ({
+            dataHora: trimText(entry.occurredAt, 80) || null,
+            tipo: trimText(entry.kind, 40) || 'adjustment',
+            variacaoSaldo: Number((finite(entry.amountCents) / 100).toFixed(2)),
+            saldoAposMovimento: hasNumericValue(entry.balanceCents) ? Number((finite(entry.balanceCents) / 100).toFixed(2)) : null,
+        })),
+        historicoTruncadoNaFonte: Boolean(profile.historyMeta?.truncated?.any),
     };
 }
 
@@ -311,12 +553,35 @@ function safeSpreadsheetRow(row) {
     }));
 }
 
+function selectConsumerHistoryProfiles(profiles, terms, intent) {
+    if (!intent.purchaseHistory || !terms.length) return [];
+    const generic = new Set(['cliente', 'clientes', 'compra', 'compras', 'pedido', 'pedidos', 'produto', 'produtos', 'historico', 'frequencia', 'pagamento', 'pagamentos']);
+    const specificTerms = terms.filter((term) => !generic.has(term));
+    if (!specificTerms.length) return [];
+    return profiles
+        .map((profile) => {
+            const evidence = [profile.name];
+            for (const order of Array.isArray(profile.ordersHistory) ? profile.ordersHistory : []) {
+                const parts = localOrderParts(order.orderedAt);
+                evidence.push(parts.weekday, parts.hour === null ? '' : `${parts.hour} horas`, order.origin, order.status);
+                for (const item of Array.isArray(order.items) ? order.items : []) evidence.push(item.productName, item.category);
+                for (const payment of Array.isArray(order.payments) ? order.payments : []) evidence.push(payment.method);
+            }
+            return { profile, score: scoreText(evidence.join(' '), specificTerms) };
+        })
+        .filter((entry) => entry.score > 0)
+        .sort((left, right) => right.score - left.score || finite(right.profile.orderCount) - finite(left.profile.orderCount))
+        .slice(0, 8)
+        .map((entry) => safeDetailedConsumerProfile(entry.profile));
+}
+
 function selectDetails(datasets, terms, intent) {
     const customers = datasets.customers || [];
     const products = datasets.products || [];
     const reports = datasets.reports || [];
     const imports = datasets.imports || [];
     const spreadsheets = datasets.spreadsheets || [];
+    const consumerProfiles = datasets.consumerProfiles || [];
 
     const customerMatches = customers
         .map((record) => ({ record, score: scoreText(`${record.nome} ${record.status} ${record.ultimaCompra}`, terms) }))
@@ -366,6 +631,10 @@ function selectDetails(datasets, terms, intent) {
         campanhas: selectedReports,
         importacoes: selectedImports,
         planilhasAdicionais: selectedSpreadsheetRows,
+        perfisComportamentaisConsumer: intent.purchaseHistory
+            ? consumerProfiles.filter((profile) => profile.active !== false).slice(0, 250).map(profileBehavior)
+            : [],
+        historicosConsumer: selectConsumerHistoryProfiles(consumerProfiles, terms, intent),
     };
 }
 
@@ -375,6 +644,8 @@ function enforceBudget(context, budgetChars) {
         context.detalhes.produtos,
         context.detalhes.campanhas,
         context.detalhes.importacoes,
+        context.detalhes.perfisComportamentaisConsumer,
+        context.detalhes.historicosConsumer,
     ];
     const spreadsheetSources = context.detalhes.planilhasAdicionais;
     const serializedLength = () => JSON.stringify(context).length;
@@ -391,11 +662,14 @@ function enforceBudget(context, budgetChars) {
         produtos: context.detalhes.produtos.length,
         campanhas: context.detalhes.campanhas.length,
         importacoes: context.detalhes.importacoes.length,
+        perfisComportamentaisConsumer: context.detalhes.perfisComportamentaisConsumer.length,
+        historicosConsumer: context.detalhes.historicosConsumer.length,
         linhasPlanilhasAdicionais: context.detalhes.planilhasAdicionais.reduce((sum, source) => sum + source.linhas.length, 0),
     };
     context.cobertura.truncadoPorOrcamento = serializedLength() > budgetChars
         || context.cobertura.incluidos.clientes < context.cobertura.avaliados.clientes
-        || context.cobertura.incluidos.produtos < context.cobertura.avaliados.produtos;
+        || context.cobertura.incluidos.produtos < context.cobertura.avaliados.produtos
+        || context.cobertura.incluidos.perfisComportamentaisConsumer < context.cobertura.avaliados.perfisConsumer;
     return context;
 }
 
@@ -406,18 +680,22 @@ function buildContextValue(datasets, options) {
     const reports = Array.isArray(datasets.reports) ? datasets.reports : [];
     const spreadsheets = Array.isArray(datasets.spreadsheets) ? datasets.spreadsheets : [];
     const runtime = datasets.runtime && typeof datasets.runtime === 'object' ? datasets.runtime : {};
+    const consumerAnalytics = datasets.consumerAnalytics && typeof datasets.consumerAnalytics === 'object'
+        ? datasets.consumerAnalytics
+        : {};
+    const consumerProfiles = Array.isArray(datasets.consumerProfiles) ? datasets.consumerProfiles : [];
     const question = String(options.question || '');
     const intent = classifyIntent(question, options.operation);
     const terms = termsFromQuestion(question);
-    const details = selectDetails({ customers, products, imports, reports, spreadsheets }, terms, intent);
+    const details = selectDetails({ customers, products, imports, reports, spreadsheets, consumerProfiles }, terms, intent);
     const spreadsheetRows = spreadsheets.reduce((sum, source) => sum + (Array.isArray(source.rows) ? source.rows.length : 0), 0);
     const context = {
-        versaoContexto: 3,
+        versaoContexto: 5,
         geradoEm: new Date().toISOString(),
         consulta: { operacao: options.operation, intencoes: intent, termosDeRecuperacao: terms },
         cobertura: {
             estrategia: 'Todos os registros foram avaliados localmente; apenas os itens mais relevantes cabem no prompt.',
-            avaliados: { clientes: customers.length, produtos: products.length, campanhas: reports.length, importacoes: imports.length, linhasPlanilhasAdicionais: spreadsheetRows },
+            avaliados: { clientes: customers.length, produtos: products.length, campanhas: reports.length, importacoes: imports.length, perfisConsumer: consumerProfiles.length, linhasPlanilhasAdicionais: spreadsheetRows },
             incluidos: {},
             truncadoPorOrcamento: false,
         },
@@ -425,6 +703,8 @@ function buildContextValue(datasets, options) {
         resumoEstoque: productSummary(products),
         resumoCampanhas: campaignSummary(reports),
         resumoImportacoes: importsSummary(imports),
+        resumoHistoricoConsumer: safeConsumerAnalytics(consumerAnalytics),
+        resumoPadroesConsumer: consumerBehaviorSummary(consumerProfiles),
         integracoes: runtimeSummary(runtime),
         qualidadeDados: {
             clientesSemTelefone: customers.filter((record) => !(record.telefone || record.telefoneValido || record.telefoneOriginal)).length,
@@ -454,6 +734,10 @@ class BusinessContextService {
             reports: Array.isArray(datasets.reports) ? datasets.reports : [],
             spreadsheets: Array.isArray(datasets.spreadsheets) ? datasets.spreadsheets : [],
             runtime: datasets.runtime && typeof datasets.runtime === 'object' ? datasets.runtime : {},
+            consumerAnalytics: datasets.consumerAnalytics && typeof datasets.consumerAnalytics === 'object'
+                ? datasets.consumerAnalytics
+                : {},
+            consumerProfiles: Array.isArray(datasets.consumerProfiles) ? datasets.consumerProfiles : [],
         };
         const budgetChars = Math.min(100000, Math.max(6000, finite(options.budgetChars, 36000)));
         const signature = createBusinessSignature(normalizedDatasets);
