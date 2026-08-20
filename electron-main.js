@@ -9,6 +9,7 @@ process.env.VALEVERDE_DATA_DIR ||= path.join(userDataPath, 'data');
 process.env.VALEVERDE_REPORTS_DIR ||= path.join(userDataPath, 'reports');
 process.env.VALEVERDE_TEMPLATES_DIR ||= path.join(userDataPath, 'templates');
 process.env.VALEVERDE_AUTH_DIR ||= path.join(userDataPath, 'whatsapp-auth');
+const CAMPAIGN_MEDIA_DIR = path.join(userDataPath, 'campaign-media');
 
 const whatsapp = require('./core/whatsapp');
 const database = require('./core/database');
@@ -34,6 +35,8 @@ let consumerDataCache = null;
 let consumerBackupSyncService = null;
 const verifiedCampaignTests = new Map();
 const TEST_VALIDITY_MS = 60 * 60 * 1000;
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const MAX_CAMPAIGN_IMAGE_BYTES = 16 * 1024 * 1024;
 
 function consumerDatabasePath() {
     return path.join(process.env.VALEVERDE_DATA_DIR, 'consumer-analytics.sqlite');
@@ -457,17 +460,94 @@ async function runDataUrlImport(event, input = {}) {
     }
 }
 
-function messageFingerprint(message, pix = {}) {
+function isPathInside(parent, candidate) {
+    const parentPath = path.resolve(parent);
+    const candidatePath = path.resolve(candidate);
+    return candidatePath === parentPath || candidatePath.startsWith(`${parentPath}${path.sep}`);
+}
+
+function imageMimeType(extension) {
+    const normalized = String(extension || '').replace(/^\./, '').toLowerCase();
+    if (normalized === 'jpg' || normalized === 'jpeg') return 'image/jpeg';
+    if (normalized === 'png') return 'image/png';
+    if (normalized === 'webp') return 'image/webp';
+    return 'application/octet-stream';
+}
+
+function imagePreviewDataUrl(filePath, extension) {
+    const data = fs.readFileSync(filePath);
+    return `data:${imageMimeType(extension)};base64,${data.toString('base64')}`;
+}
+
+function mediaFileInfo(filePath) {
+    if (!fs.existsSync(filePath)) throw new Error('Imagem da campanha indisponivel. Importe a imagem novamente.');
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile()) throw new Error('Selecione um arquivo de imagem valido.');
+    if (stats.size > MAX_CAMPAIGN_IMAGE_BYTES) throw new Error('A imagem deve ter no maximo 16 MB.');
+    const extension = path.extname(filePath).toLowerCase();
+    if (!IMAGE_EXTENSIONS.has(extension)) throw new Error('Use imagem PNG, JPG, JPEG ou WEBP.');
+    return {
+        filePath,
+        fileName: path.basename(filePath),
+        extension: extension.slice(1),
+        size: stats.size,
+        fingerprint: `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`,
+    };
+}
+
+function importCampaignImage(filePath) {
+    const source = mediaFileInfo(filePath);
+    fs.mkdirSync(CAMPAIGN_MEDIA_DIR, { recursive: true });
+    const targetName = `${Date.now()}-${crypto.randomUUID()}${path.extname(source.fileName).toLowerCase()}`;
+    const targetPath = path.join(CAMPAIGN_MEDIA_DIR, targetName);
+    fs.copyFileSync(source.filePath, targetPath);
+    const imported = mediaFileInfo(targetPath);
+    return {
+        mediaPath: imported.filePath,
+        fileName: source.fileName,
+        extension: imported.extension,
+        size: imported.size,
+        previewDataUrl: imagePreviewDataUrl(imported.filePath, imported.extension),
+    };
+}
+
+function validateImportedCampaignImage(filePath) {
+    const candidate = String(filePath || '').trim();
+    if (!candidate) return null;
+    if (!isPathInside(CAMPAIGN_MEDIA_DIR, candidate)) {
+        throw new Error('Imagem da campanha invalida. Importe a imagem novamente.');
+    }
+    return mediaFileInfo(candidate);
+}
+
+function campaignMediaFingerprint(input = {}) {
+    const imported = validateImportedCampaignImage(input.mediaPath);
+    if (imported) return { origem: 'campanha', ...imported };
+
+    const templateId = String(input.templateId || input.template || '').replace(/\.txt$/i, '').trim();
+    if (!templateId) return null;
+    const templateImagePath = templates.findTemplateImagePath(templateId);
+    if (!templateImagePath) return null;
+    return { origem: 'template', templateId, ...mediaFileInfo(templateImagePath) };
+}
+
+function messageFingerprint(message, pix = {}, media = null) {
     const payload = JSON.stringify({
         mensagem: String(message || ''),
         pix: pixUtils.normalizePixSettings(pix),
+        media: media ? {
+            origem: media.origem,
+            templateId: media.templateId || '',
+            fileName: media.fileName,
+            fingerprint: media.fingerprint,
+        } : null,
     });
     return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
-function getVerifiedTest(testId, message, pix) {
+function getVerifiedTest(testId, message, pix, media) {
     const test = verifiedCampaignTests.get(String(testId || ''));
-    if (!test || test.expiresAt < Date.now() || test.messageHash !== messageFingerprint(message, pix)) {
+    if (!test || test.expiresAt < Date.now() || test.messageHash !== messageFingerprint(message, pix, media)) {
         throw new Error('Envie um novo teste depois de qualquer alteracao na mensagem ou nos dados PIX.');
     }
     return test;
@@ -620,7 +700,9 @@ function validateCampaign(payload = {}) {
     if (!recipientIds.length) throw new Error('Selecione pelo menos um destinatario.');
     const settings = appSettings();
     const pix = pixUtils.normalizePixSettings(settings.pix);
-    const test = getVerifiedTest(payload.testeId, mensagem, pix);
+    const templateId = String(payload.templateId || payload.template || '').replace(/\.txt$/i, '').trim();
+    const media = campaignMediaFingerprint({ mediaPath: payload.mediaPath, templateId });
+    const test = getVerifiedTest(payload.testeId, mensagem, pix, media);
     const intervaloMin = Number(payload.intervaloMin ?? settings.intervaloMin);
     const intervaloMax = Number(payload.intervaloMax ?? settings.intervaloMax);
     if (!Number.isFinite(intervaloMin) || !Number.isFinite(intervaloMax)
@@ -632,6 +714,9 @@ function validateCampaign(payload = {}) {
         tipoEnvio: tipo === 'cobranca' ? 'devedores' : 'todos',
         somenteDevedores: tipo === 'cobranca',
         mensagem,
+        templateId,
+        mediaPath: media?.origem === 'campanha' ? media.filePath : '',
+        mediaFileName: media?.fileName || '',
         pix,
         recipientIds,
         limiteMinimoDevedor: 50,
@@ -741,6 +826,16 @@ function registerIpcHandlers() {
         return { cancelado: false, template: templates.saveTemplate({ nome, texto }) };
     });
 
+    ipcMain.handle('campaign:image-import', async () => {
+        const selection = await dialog.showOpenDialog(mainWindow, {
+            title: 'Importar imagem da campanha',
+            properties: ['openFile'],
+            filters: [{ name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+        });
+        if (selection.canceled || !selection.filePaths[0]) return { cancelado: true };
+        return { cancelado: false, imagem: importCampaignImage(selection.filePaths[0]) };
+    });
+
     ipcMain.handle('whatsapp:start', async () => {
         // O modulo persiste e publica a falha; apenas evitamos uma rejeicao sem consumidor no IPC.
         whatsapp.iniciar().catch(() => undefined);
@@ -763,17 +858,21 @@ function registerIpcHandlers() {
         }
         const settings = appSettings();
         const pix = pixUtils.normalizePixSettings(settings.pix);
+        const templateId = String(input.templateId || input.template || '').replace(/\.txt$/i, '').trim();
+        const media = campaignMediaFingerprint({ mediaPath: input.mediaPath, templateId });
         const resultado = await sender.enviarTeste({
             telefone: String(input.telefone || ''),
             mensagem: String(input.mensagem || ''),
             clienteExemplo: customerExample,
+            templateId,
+            mediaPath: media?.origem === 'campanha' ? media.filePath : '',
             pix,
         }, whatsapp.getClient());
         const testeId = crypto.randomUUID();
         verifiedCampaignTests.set(testeId, {
             data: new Date().toISOString(),
             expiresAt: Date.now() + TEST_VALIDITY_MS,
-            messageHash: messageFingerprint(input.mensagem, pix),
+            messageHash: messageFingerprint(input.mensagem, pix, media),
         });
         return { ...resultado, testeId };
     });

@@ -110,6 +110,8 @@ test('template e mensagem personalizada seguem sem prefixo ou rodape e usam o cl
         expect(calls.tests[0]).toEqual({
             telefone: '22999999999',
             mensagem: TEMPLATE,
+            templateId: 'oferta-exata',
+            mediaPath: '',
             clienteExemploId: 'cli-ana',
         });
 
@@ -118,6 +120,9 @@ test('template e mensagem personalizada seguem sem prefixo ou rodape e usam o cl
         await expect.poll(async () => (await campaignCalls(electronApp)).starts.length).toBe(1);
         calls = await campaignCalls(electronApp);
         expect(calls.starts[0].mensagem).toBe(TEMPLATE);
+        expect(calls.starts[0].templateId).toBe('oferta-exata');
+        expect(calls.starts[0].mediaPath).toBe('');
+        expect(calls.starts[0].mediaFileName).toBe('');
         expect(calls.starts[0].recipientIds).toEqual(['cli-ana']);
         expect(calls.starts[0].mensagem).not.toContain('Esta e uma mensagem automatica');
         expect(calls.starts[0].mensagem).not.toContain('Cliente:');

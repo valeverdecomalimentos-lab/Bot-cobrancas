@@ -169,6 +169,32 @@ test('teste, promocao e cobranca enviam somente a mensagem personalizada resolvi
     ]);
 });
 
+test('sender envia imagem anexada com a mensagem como legenda', async () => {
+    const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'valeverde-media-send-'));
+    const imagePath = path.join(temporaryDirectory, 'campanha.png');
+    const enviados = [];
+    const client = {
+        isRegisteredUser: async () => true,
+        sendMessage: async (telefone, conteudo, options) => enviados.push({ telefone, conteudo, options }),
+    };
+
+    try {
+        fs.writeFileSync(imagePath, Buffer.from('iVBORw0KGgo=', 'base64'));
+        await sender.enviarTeste({
+            telefone: '22999999999',
+            mensagem: 'Oi, {{nome}}',
+            clienteExemplo: cliente,
+            mediaPath: imagePath,
+        }, client);
+
+        assert.equal(enviados.length, 1);
+        assert.equal(enviados[0].options.caption, 'Oi, Maria da Silva');
+        assert.equal(enviados[0].conteudo.mimetype, 'image/png');
+    } finally {
+        fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+});
+
 test('migra apenas o PIX fixo do template legado e preserva um backup', () => {
     const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'valeverde-template-pix-'));
     const templatePath = path.join(temporaryDirectory, 'cobranca.txt');

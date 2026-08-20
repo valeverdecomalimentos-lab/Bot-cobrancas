@@ -4,6 +4,7 @@ const { cleanText, slugify } = require('./customer-utils');
 
 const BUNDLED_TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
 const TEMPLATES_DIR = process.env.VALEVERDE_TEMPLATES_DIR || BUNDLED_TEMPLATES_DIR;
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
 const LEGACY_PIX_KEY = '22998628769';
 const LEGACY_PIX_BENEFICIARY = 'Israel Felipe de Oliveira Donadio';
 
@@ -47,17 +48,43 @@ function titleFromFile(fileName) {
         .join(' ');
 }
 
+function findTemplateImagePath(id) {
+    ensureTemplatesDir();
+    const safeId = path.basename(String(id || '').replace(/\.txt$/i, ''));
+    if (!safeId) return null;
+    for (const extension of IMAGE_EXTENSIONS) {
+        const filePath = path.join(TEMPLATES_DIR, `${safeId}${extension}`);
+        if (fs.existsSync(filePath)) return filePath;
+    }
+    return null;
+}
+
+function templateImageMetadata(id) {
+    const filePath = findTemplateImagePath(id);
+    if (!filePath) return null;
+    const stats = fs.statSync(filePath);
+    return {
+        arquivo: path.basename(filePath),
+        extensao: path.extname(filePath).slice(1).toLowerCase(),
+        tamanho: stats.size,
+    };
+}
+
 function listTemplates() {
     ensureTemplatesDir();
     return fs.readdirSync(TEMPLATES_DIR)
         .filter((name) => name.toLowerCase().endsWith('.txt'))
         .sort((a, b) => a.localeCompare(b, 'pt-BR'))
-        .map((name) => ({
-            id: path.basename(name, '.txt'),
-            nome: titleFromFile(name),
-            arquivo: name,
-            texto: fs.readFileSync(path.join(TEMPLATES_DIR, name), 'utf8').trim(),
-        }));
+        .map((name) => {
+            const id = path.basename(name, '.txt');
+            return {
+                id,
+                nome: titleFromFile(name),
+                arquivo: name,
+                texto: fs.readFileSync(path.join(TEMPLATES_DIR, name), 'utf8').trim(),
+                imagem: templateImageMetadata(id),
+            };
+        });
 }
 
 function getTemplateByFile(fileName) {
@@ -94,8 +121,10 @@ function deleteTemplate(id) {
 }
 
 module.exports = {
+    IMAGE_EXTENSIONS,
     listTemplates,
     getTemplateByFile,
     saveTemplate,
     deleteTemplate,
+    findTemplateImagePath,
 };

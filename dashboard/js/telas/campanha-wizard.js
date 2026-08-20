@@ -8,6 +8,13 @@ import { Icone } from '../nucleo/icones.js';
 const ETAPAS = ['Tipo', 'Mensagem', 'Destinatários', 'Teste', 'Confirmação'];
 const PLACEHOLDERS = ['{{nome}}', '{{valor}}', '{{saldo_devedor}}', '{{pix_nome_favorecido}}', '{{pix_tipo}}', '{{pix_chave}}', '{{telefone}}', '{{cpf}}'];
 
+function formatarTamanhoImagem(bytes) {
+  const valor = Number(bytes || 0);
+  if (!Number.isFinite(valor) || valor <= 0) return '';
+  if (valor < 1024 * 1024) return `${Math.max(1, Math.round(valor / 1024))} KB`;
+  return `${(valor / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`;
+}
+
 function saldo(cliente) {
   return Number(cliente.saldo_devedor ?? cliente.valorDevido ?? cliente.valor ?? 0);
 }
@@ -58,6 +65,7 @@ export function montarNovaCampanha(alvo) {
     telefoneTeste: '',
     testeEnviado: false,
     testeId: '',
+    imagem: null,
   };
   let etapaAtual = rascunho.tipo ? 1 : 0;
   estado.novaCampanhaTipoInicial = null;
@@ -76,6 +84,33 @@ export function montarNovaCampanha(alvo) {
   function invalidarTeste() {
     rascunho.testeEnviado = false;
     rascunho.testeId = '';
+  }
+
+  function templateAtual() {
+    return estado.config.templates.find((item) => String(item.id) === String(rascunho.templateId)) || null;
+  }
+
+  function imagemAtiva() {
+    if (rascunho.imagem?.mediaPath) return { ...rascunho.imagem, origem: 'campanha' };
+    const template = templateAtual();
+    if (template?.imagem) {
+      return {
+        origem: 'template',
+        fileName: template.imagem.arquivo,
+        extension: template.imagem.extensao,
+        size: template.imagem.tamanho,
+      };
+    }
+    return null;
+  }
+
+  function previaImagemHtml(imagem) {
+    if (!imagem) return '';
+    const nome = escaparHtml(imagem.fileName || 'imagem');
+    if (imagem.previewDataUrl) {
+      return `<div class="previa-imagem-whats"><img src="${escaparHtml(imagem.previewDataUrl)}" alt="${nome}"></div>`;
+    }
+    return `<div class="previa-imagem-whats previa-imagem-whats--arquivo">${Icone.upload}<span>${nome}</span></div>`;
   }
 
   function renderizarTrilha() {
@@ -137,10 +172,18 @@ export function montarNovaCampanha(alvo) {
             <div class="placeholders">${PLACEHOLDERS.map((placeholder) => `<button class="chip-placeholder" type="button" data-placeholder="${placeholder}">${placeholder}</button>`).join('')}</div>
             <textarea id="texto-mensagem" rows="8" placeholder="Escreva a mensagem que será enviada" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">${escaparHtml(rascunho.mensagem)}</textarea>
             <small>O WhatsApp receberá somente este texto, com os placeholders substituídos. O sistema não adiciona avisos nem rodapés.</small>
+            <div class="anexo-campanha">
+              <div class="anexo-campanha__topo"><label>Imagem da campanha</label><span id="imagem-status" class="badge badge--neutro">Sem imagem</span></div>
+              <div id="imagem-detalhe" class="anexo-campanha__detalhe"></div>
+              <div class="anexo-campanha__acoes">
+                <button class="btn btn--secundario" id="btn-importar-imagem" type="button">${Icone.upload} Importar imagem</button>
+                <button class="btn btn--fantasma" id="btn-remover-imagem" type="button" hidden>${Icone.x} Remover</button>
+              </div>
+            </div>
           </div>
           <div>
             <label>Prévia com dados reais</label>
-            <div class="previa-mensagem"><div class="bolha-whats" id="bolha-previa"></div></div>
+            <div class="previa-mensagem"><div id="previa-imagem"></div><div class="bolha-whats" id="bolha-previa"></div></div>
           </div>
         </div>
         <div class="acoes-rodape acoes-rodape--entre"><button class="btn btn--secundario" id="btn-voltar">Voltar</button><button class="btn btn--primario" id="btn-avancar" ${rascunho.mensagem.trim() ? '' : 'disabled'}>Avançar ${Icone.seta}</button></div>
@@ -148,6 +191,10 @@ export function montarNovaCampanha(alvo) {
     const textarea = el.querySelector('#texto-mensagem');
     const seletor = el.querySelector('#seletor-template');
     const botaoAvancar = el.querySelector('#btn-avancar');
+    const botaoImportarImagem = el.querySelector('#btn-importar-imagem');
+    const botaoRemoverImagem = el.querySelector('#btn-remover-imagem');
+    const imagemStatus = el.querySelector('#imagem-status');
+    const imagemDetalhe = el.querySelector('#imagem-detalhe');
     function focarNoFim() {
       const fim = textarea.value.length;
       textarea.focus({ preventScroll: true });
@@ -172,16 +219,60 @@ export function montarNovaCampanha(alvo) {
       }
       atualizar();
     }
+    function atualizarAnexo() {
+      const imagem = imagemAtiva();
+      if (!imagem) {
+        imagemStatus.className = 'badge badge--neutro';
+        imagemStatus.textContent = 'Sem imagem';
+        imagemDetalhe.textContent = 'A campanha será enviada apenas com texto.';
+        botaoRemoverImagem.hidden = true;
+        return;
+      }
+      const tamanho = formatarTamanhoImagem(imagem.size);
+      const origem = imagem.origem === 'campanha' ? 'Imagem importada' : 'Imagem do template';
+      imagemStatus.className = imagem.origem === 'campanha' ? 'badge badge--sucesso' : 'badge badge--alerta';
+      imagemStatus.textContent = origem;
+      imagemDetalhe.innerHTML = `${Icone.upload}<span>${escaparHtml(imagem.fileName || 'imagem')}${tamanho ? ` - ${escaparHtml(tamanho)}` : ''}</span>`;
+      botaoRemoverImagem.hidden = imagem.origem !== 'campanha';
+    }
     const atualizar = () => {
       if (rascunho.mensagem !== textarea.value) invalidarTeste();
       rascunho.mensagem = textarea.value;
+      el.querySelector('#previa-imagem').innerHTML = previaImagemHtml(imagemAtiva());
       el.querySelector('#bolha-previa').innerHTML = `${escaparHtml(montarPrevia(rascunho.mensagem, clienteExemplo))}<time>--:--</time>`;
+      atualizarAnexo();
       botaoAvancar.disabled = !rascunho.mensagem.trim() || !clienteExemplo;
     };
     seletor.addEventListener('change', () => {
+      if (rascunho.templateId !== seletor.value) invalidarTeste();
       rascunho.templateId = seletor.value;
       const template = estado.config.templates.find((item) => String(item.id) === String(seletor.value));
       if (template) aplicarTexto(template.texto);
+      atualizar();
+    });
+    botaoImportarImagem.addEventListener('click', async () => {
+      botaoImportarImagem.disabled = true;
+      botaoImportarImagem.textContent = 'Importando...';
+      try {
+        const resultado = await api.importCampaignImage();
+        if (!resultado?.cancelado && resultado?.imagem) {
+          rascunho.imagem = resultado.imagem;
+          invalidarTeste();
+          atualizar();
+          mostrarToast('Imagem anexada à campanha.', 'sucesso');
+        }
+      } catch (error) {
+        mostrarToast(error.message || 'Não foi possível importar a imagem.', 'erro');
+      } finally {
+        if (el.isConnected) {
+          botaoImportarImagem.disabled = false;
+          botaoImportarImagem.innerHTML = `${Icone.upload} Importar imagem`;
+        }
+      }
+    });
+    botaoRemoverImagem.addEventListener('click', () => {
+      rascunho.imagem = null;
+      invalidarTeste();
       atualizar();
     });
     textarea.addEventListener('input', atualizar);
@@ -258,7 +349,7 @@ export function montarNovaCampanha(alvo) {
           <div class="teste-campanha__cabecalho"><span class="teste-campanha__icone">${Icone.check}</span><div><h2 id="titulo-teste">Teste no WhatsApp</h2><p><strong>Envie e confira a mensagem antes de liberar o disparo em massa.</strong></p></div></div>
           <div class="teste-campanha__corpo">
             <div class="campo"><label for="telefone-teste">Número de WhatsApp para teste</label><input type="text" id="telefone-teste" inputmode="tel" placeholder="DDD + número" value="${escaparHtml(rascunho.telefoneTeste)}"><small>O teste usa os dados reais de um destinatário elegível para renderizar os placeholders.</small></div>
-            <div class="previa-mensagem"><div class="bolha-whats">${escaparHtml(montarPrevia(rascunho.mensagem, exemplo))}<time>--:--</time></div></div>
+            <div class="previa-mensagem">${previaImagemHtml(imagemAtiva())}<div class="bolha-whats">${escaparHtml(montarPrevia(rascunho.mensagem, exemplo))}<time>--:--</time></div></div>
           </div>
           <div class="teste-campanha__acoes"><button class="btn btn--secundario" id="btn-teste" type="button" ${conectado ? '' : 'disabled'}>${Icone.play} Enviar mensagem teste</button><span id="resultado-teste" class="teste-campanha__resultado">${conectado ? 'Nenhum teste confirmado para esta mensagem.' : 'Conecte o WhatsApp para enviar o teste.'}</span></div>
         </section>
@@ -283,6 +374,8 @@ export function montarNovaCampanha(alvo) {
         const resultado = await api.sendTest({
           telefone,
           mensagem: rascunho.mensagem,
+          templateId: rascunho.templateId,
+          mediaPath: rascunho.imagem?.mediaPath || '',
           clienteExemploId: exemplo?.id,
         });
         rascunho.telefoneTeste = telefone;
@@ -317,10 +410,14 @@ export function montarNovaCampanha(alvo) {
     const selecionados = rascunho.destinatarios.filter((item) => item.incluido);
     const intervaloMedio = (Number(estado.config.intervaloMin) + Number(estado.config.intervaloMax)) / 2;
     const minutos = Math.max(1, Math.ceil((selecionados.length * intervaloMedio) / 60));
+    const imagem = imagemAtiva();
+    const resumoImagem = imagem
+      ? `${imagem.origem === 'campanha' ? 'Imagem importada' : 'Imagem do template'}: ${imagem.fileName || 'imagem'}`
+      : 'Sem imagem';
     const el = paraElemento(`
       <div class="cartao confirmacao-campanha">
         <div class="confirmacao-campanha__cabecalho"><span>${Icone.check}</span><div><h2>Pronto para disparar</h2><p>Teste confirmado em <strong>${escaparHtml(formatarTelefone(rascunho.telefoneTeste))}</strong>.</p></div></div>
-        <dl class="confirmacao-campanha__dados"><div><dt>Destinatários</dt><dd>${selecionados.length}</dd></div><div><dt>Tempo estimado</dt><dd>${minutos} min</dd></div><div><dt>Intervalo</dt><dd>${estado.config.intervaloMin} a ${estado.config.intervaloMax} s</dd></div></dl>
+        <dl class="confirmacao-campanha__dados"><div><dt>Destinatários</dt><dd>${selecionados.length}</dd></div><div><dt>Tempo estimado</dt><dd>${minutos} min</dd></div><div><dt>Intervalo</dt><dd>${estado.config.intervaloMin} a ${estado.config.intervaloMax} s</dd></div><div><dt>Imagem</dt><dd>${escaparHtml(resumoImagem)}</dd></div></dl>
         <div class="aviso-caixa">${Icone.aviso}<span>O envio acontece um a um. A mensagem validada no teste será enviada para a seleção atual.</span></div>
         <div class="acoes-rodape acoes-rodape--entre"><button class="btn btn--secundario" id="btn-voltar">Voltar</button><button class="btn btn--primario" id="btn-disparar">${Icone.play} Disparar campanha</button></div>
       </div>`);
@@ -330,6 +427,9 @@ export function montarNovaCampanha(alvo) {
         id: `campanha-${Date.now()}`,
         tipo: rascunho.tipo,
         mensagem: rascunho.mensagem,
+        templateId: rascunho.templateId,
+        mediaPath: rascunho.imagem?.mediaPath || '',
+        mediaFileName: rascunho.imagem?.fileName || '',
         recipientIds: selecionados.map((cliente) => cliente.id),
         testeId: rascunho.testeId,
         totalPlanejado: selecionados.length,

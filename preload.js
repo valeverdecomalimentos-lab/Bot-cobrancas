@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('valeverdeAPI', {
     startWhatsapp: () => ipcRenderer.invoke('whatsapp:start'),
     getWhatsappStatus: () => ipcRenderer.invoke('whatsapp:status'),
     resetWhatsapp: () => ipcRenderer.invoke('whatsapp:reset'),
+    importCampaignImage: () => ipcRenderer.invoke('campaign:image-import'),
     sendTest: (input) => ipcRenderer.invoke('campaign:test', input),
     startCampaign: (campaign) => ipcRenderer.invoke('campaign:start', campaign),
     pauseCampaign: (paused) => ipcRenderer.invoke('campaign:pause', paused),

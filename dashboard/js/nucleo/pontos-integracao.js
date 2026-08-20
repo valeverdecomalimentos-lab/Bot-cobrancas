@@ -26,6 +26,7 @@ export const api = bridge || {
   startWhatsapp: indisponivel,
   getWhatsappStatus: indisponivel,
   resetWhatsapp: indisponivel,
+  importCampaignImage: indisponivel,
   sendTest: indisponivel,
   startCampaign: indisponivel,
   pauseCampaign: indisponivel,

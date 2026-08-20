@@ -1,4 +1,8 @@
+const path = require('path');
+const fs = require('fs');
+const { MessageMedia } = require('whatsapp-web.js');
 const message = require('./message');
+const templatesStore = require('./templates-store');
 const config = require('../config');
 const {
     DEBTOR_THRESHOLD,
@@ -10,6 +14,7 @@ const {
 } = require('./customer-utils');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const MEDIA_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 function randomWait(min = config.tempoMin, max = config.tempoMax) {
     const safeMin = Number(min || 0);
@@ -51,6 +56,29 @@ function resolveMessage(cliente, campanha, options = {}) {
     return message.montar(cliente, campanha.template, campanha.mostrarRodapeContato, pixSettings);
 }
 
+function resolveTemplateId(input = {}) {
+    return String(input.templateId || input.template || '')
+        .replace(/\.txt$/i, '')
+        .trim();
+}
+
+function resolveMediaPath(input = {}) {
+    const explicitPath = String(input.mediaPath || input.imagemPath || '').trim();
+    if (explicitPath) {
+        const extension = path.extname(explicitPath).toLowerCase();
+        if (MEDIA_EXTENSIONS.has(extension) && fs.existsSync(explicitPath)) return explicitPath;
+    }
+
+    const templateId = resolveTemplateId(input);
+    if (!templateId) return null;
+    return templatesStore.findTemplateImagePath(templateId);
+}
+
+function resolveMedia(input = {}) {
+    const mediaPath = resolveMediaPath(input);
+    return mediaPath ? MessageMedia.fromFilePath(mediaPath) : null;
+}
+
 function classify(status) {
     if (/^Enviado/i.test(status)) return 'enviado';
     if (/^Ignorado/i.test(status)) return 'ignorado';
@@ -83,7 +111,13 @@ module.exports = {
         const isRegistered = await client.isRegisteredUser(telefoneValido);
         if (!isRegistered) throw new Error('Numero de teste nao possui WhatsApp.');
 
-        await client.sendMessage(telefoneValido, texto);
+        const media = resolveMedia(input);
+
+        if (media) {
+            await client.sendMessage(telefoneValido, media, { caption: texto });
+        } else {
+            await client.sendMessage(telefoneValido, texto);
+        }
         return { statusEnvio: 'Enviado (teste)', telefoneValido };
     },
 
@@ -109,7 +143,14 @@ module.exports = {
                     const isRegistered = await client.isRegisteredUser(cliente.telefoneValido);
 
                     if (isRegistered) {
-                        await client.sendMessage(cliente.telefoneValido, texto);
+                        const media = resolveMedia(campanhaEscolhida);
+
+                        if (media) {
+                            await client.sendMessage(cliente.telefoneValido, media, { caption: texto });
+                        } else {
+                            await client.sendMessage(cliente.telefoneValido, texto);
+                        }
+
                         resultado = { ...cliente, statusEnvio: 'Enviado' };
                     } else {
                         resultado = { ...cliente, statusEnvio: 'Erro - Nao tem WhatsApp' };
